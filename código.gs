@@ -162,70 +162,83 @@ function buscarDadosTempoReal() {
 }
 
 // === BUSCA PARADAS DETALHADAS DO TURNO ATUAL ===
+// Busca as paradas da aba PAINEL (dados consolidados)
 function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetDados = ss.getSheetByName("Página1");
-  if (!sheetDados) return [];
+  const sheetPainel = ss.getSheetByName("PAINEL") || ss.getSheetByName("Painel");
 
-  const dados = sheetDados.getDataRange().getValues();
-  const sheetTurnos = ss.getSheetByName("TURNOS");
-  const dadosTurnos = sheetTurnos.getDataRange().getValues();
-  const configTurnos = {};
+  if (!sheetPainel) return [];
 
-  for (let i = 1; i < dadosTurnos.length; i++) {
-    configTurnos[String(dadosTurnos[i][0]).trim()] = [
-       { nome: "Turno 1", inicio: dadosTurnos[i][1], fim: dadosTurnos[i][2] },
-       { nome: "Turno 2", inicio: dadosTurnos[i][3], fim: dadosTurnos[i][4] },
-       { nome: "Turno 3", inicio: dadosTurnos[i][5], fim: dadosTurnos[i][6] }
-    ];
-  }
+  const dados = sheetPainel.getDataRange().getValues();
+  const timezone = ss.getSpreadsheetTimeZone();
 
-  const paradas = [];
-  const dataProd = new Date(dataProducao);
+  // Converter dataProducao para formato comparável
+  const dataProdBusca = new Date(dataProducao);
+  dataProdBusca.setHours(0, 0, 0, 0);
+  const dataProdStr = Utilities.formatDate(dataProdBusca, timezone, "dd/MM/yyyy");
 
-  for (let i = dados.length - 1; i > 0; i--) {
+  // Buscar a linha correspondente
+  for (let i = 1; i < dados.length; i++) {
     let linha = dados[i];
-    let maqLinha = String(linha[2]).trim();
+    let maqPainel = String(linha[0]).trim();
+    let turnoPainel = String(linha[1]).trim();
 
-    if (maqLinha !== maquina) continue;
-    if (linha[3] !== "TEMPO PARADA") continue;
+    // Converter data da planilha
+    let dataPainel = lerDataBR(linha[2]);
+    let dataPainelStr = Utilities.formatDate(dataPainel, timezone, "dd/MM/yyyy");
 
-    let dataReg = lerDataBR(linha[0]);
-    let horaRegObj = new Date(linha[1]);
+    // Verificar se é a linha correta
+    if (maqPainel === maquina && turnoPainel === turnoNome && dataPainelStr === dataProdStr) {
+      // Colunas: 5=TEMPOS>3min, 6=TEMPOS>10min, 7=TEMPOS>20min, 8=TEMPOS>30min
+      const paradas = [];
 
-    if (!isNaN(dataReg.getTime()) && !isNaN(horaRegObj.getTime())) {
-      let fullDateReg = new Date(dataReg);
-      fullDateReg.setHours(horaRegObj.getHours(), horaRegObj.getMinutes(), horaRegObj.getSeconds());
+      // Parsear as colunas de tempos (assumindo formato: "00:10:30, 00:15:20")
+      const categorias = [
+        { coluna: 5, nome: "> 3 min", minDuracao: 180 },
+        { coluna: 6, nome: "> 10 min", minDuracao: 600 },
+        { coluna: 7, nome: "> 20 min", minDuracao: 1200 },
+        { coluna: 8, nome: "> 30 min", minDuracao: 1800 }
+      ];
 
-      let infoTurnoReg = descobrirTurnoCompleto(fullDateReg, maquina, configTurnos);
+      categorias.forEach(cat => {
+        const valorColuna = String(linha[cat.coluna] || "").trim();
 
-      if (infoTurnoReg && infoTurnoReg.nome === turnoNome) {
-        let dataProdReg = new Date(dataReg);
-        if (infoTurnoReg.cruzaMeiaNoite) {
-           let h = fullDateReg.getHours();
-           let hIni = Math.floor(infoTurnoReg.minInicio / 60);
-           if (h < hIni) dataProdReg.setDate(dataProdReg.getDate() - 1);
+        if (valorColuna && valorColuna !== "-" && valorColuna !== "") {
+          // Parsear múltiplos tempos separados por vírgula
+          const tempos = valorColuna.split(",");
+
+          tempos.forEach(tempo => {
+            tempo = tempo.trim();
+            if (tempo && tempo.includes(":")) {
+              const partes = tempo.split(":");
+              if (partes.length >= 2) {
+                const h = parseInt(partes[0]) || 0;
+                const m = parseInt(partes[1]) || 0;
+                const s = partes.length > 2 ? (parseInt(partes[2]) || 0) : 0;
+                const duracaoSeg = h * 3600 + m * 60 + s;
+
+                if (duracaoSeg >= cat.minDuracao) {
+                  paradas.push({
+                    categoria: cat.nome,
+                    duracao: duracaoSeg,
+                    duracaoFmt: tempo,
+                    horario: "-" // Não temos horário específico no PAINEL
+                  });
+                }
+              }
+            }
+          });
         }
-        dataProdReg.setHours(0,0,0,0);
+      });
 
-        if (dataProdReg.getTime() === dataProd) {
-          let duracao = parseDuration(linha[4]);
-          if (duracao > 180) { // Apenas paradas > 3 minutos
-            paradas.push({
-              horario: Utilities.formatDate(fullDateReg, ss.getSpreadsheetTimeZone(), "HH:mm:ss"),
-              duracao: duracao,
-              duracaoFmt: formatarSegundosParaHora(duracao)
-            });
-          }
-        }
-      }
+      // Ordenar por duração (maior primeiro)
+      paradas.sort((a, b) => b.duracao - a.duracao);
+
+      return paradas;
     }
   }
 
-  // Ordena por horário (mais recente primeiro)
-  paradas.sort((a, b) => b.horario.localeCompare(a.horario));
-
-  return paradas;
+  return [];
 }
 
 function formatarSegundosParaHora(segundos) {
@@ -619,4 +632,39 @@ function formatarListaTempos(lista) {
 }
 function exibirMensagem(msg) {
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) { console.log(msg); }
+}
+
+// === FUNÇÃO DE DIAGNÓSTICO ===
+function diagnosticarMaquina(nomeMaquina) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetDados = ss.getSheetByName("Página1");
+
+  if (!sheetDados) return { erro: "Aba Página1 não encontrada" };
+
+  const dados = sheetDados.getDataRange().getValues();
+  const registros = [];
+
+  // Buscar últimos 10 registros da máquina
+  for (let i = dados.length - 1; i > 0 && registros.length < 10; i--) {
+    let linha = dados[i];
+    let maqLinha = String(linha[2]).trim();
+
+    if (maqLinha === nomeMaquina) {
+      registros.push({
+        linha: i + 1,
+        data: linha[0],
+        hora: linha[1],
+        maquina: linha[2],
+        evento: linha[3],
+        duracao: linha[4]
+      });
+    }
+  }
+
+  return {
+    maquina: nomeMaquina,
+    totalRegistros: registros.length,
+    ultimoEvento: registros.length > 0 ? registros[0].evento : "Nenhum",
+    registros: registros
+  };
 }
