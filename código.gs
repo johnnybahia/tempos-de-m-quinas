@@ -162,105 +162,85 @@ function buscarDadosTempoReal() {
 }
 
 // === BUSCA PARADAS DETALHADAS DO TURNO ATUAL ===
-// Busca as paradas da aba PAINEL (dados consolidados)
+// SIMPLIFICADO: Busca diretamente na aba "Pagina"
 function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetPainel = ss.getSheetByName("PAINEL") || ss.getSheetByName("Painel");
+  const sheet = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
 
-  if (!sheetPainel) {
-    Logger.log("ERRO: Aba PAINEL não encontrada");
+  if (!sheet) {
+    Logger.log("ERRO: Aba 'Pagina' não encontrada");
     return [];
   }
 
-  const dados = sheetPainel.getDataRange().getValues();
+  const dados = sheet.getDataRange().getValues();
   const timezone = ss.getSpreadsheetTimeZone();
 
   // Converter dataProducao para formato comparável
-  const dataProdBusca = new Date(dataProducao);
-  dataProdBusca.setHours(0, 0, 0, 0);
-  const dataProdStr = Utilities.formatDate(dataProdBusca, timezone, "dd/MM/yyyy");
+  const dataBusca = new Date(dataProducao);
+  const dataBuscaStr = Utilities.formatDate(dataBusca, timezone, "dd/MM/yyyy");
 
-  Logger.log("DEBUG buscarParadasTurnoAtual:");
-  Logger.log("  Máquina: " + maquina);
-  Logger.log("  Turno: " + turnoNome);
-  Logger.log("  Data: " + dataProdStr);
-  Logger.log("  Total linhas PAINEL: " + dados.length);
+  Logger.log("=== buscarParadasTurnoAtual ===");
+  Logger.log("Máquina: " + maquina);
+  Logger.log("Turno: " + turnoNome);
+  Logger.log("Data: " + dataBuscaStr);
 
-  // Buscar a linha correspondente
+  // Estrutura da aba "Pagina":
+  // Col 0: MÁQUINAS
+  // Col 2: TURNO
+  // Col 3: DATA
+  // Col 6: TEMPOS > 30 min (paradas)
+
+  // Procurar a linha que corresponde
   for (let i = 1; i < dados.length; i++) {
     let linha = dados[i];
-    let maqPainel = String(linha[0]).trim();
-    let turnoPainel = String(linha[1]).trim();
+    let maqLinha = String(linha[0]).trim();
+    let turnoLinha = String(linha[2]).trim();
+    let dataLinha = lerDataBR(linha[3]);
+    let dataLinhaStr = Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy");
 
-    // Converter data da planilha
-    let dataPainel = lerDataBR(linha[2]);
-    let dataPainelStr = Utilities.formatDate(dataPainel, timezone, "dd/MM/yyyy");
+    // Verificar se é a linha correta (máquina + turno + data)
+    if (maqLinha === maquina && turnoLinha === turnoNome && dataLinhaStr === dataBuscaStr) {
+      Logger.log("✓ Linha encontrada: " + (i + 1));
 
-    // Verificar se é a linha correta
-    if (maqPainel === maquina && turnoPainel === turnoNome && dataPainelStr === dataProdStr) {
-      Logger.log("  ✓ Linha encontrada! Linha " + (i+1));
-      Logger.log("  Dados da linha:");
-      Logger.log("    Col 5 (>3min): " + linha[5]);
-      Logger.log("    Col 6 (>10min): " + linha[6]);
-      Logger.log("    Col 7 (>20min): " + linha[7]);
-      Logger.log("    Col 8 (>30min): " + linha[8]);
+      // Coluna 6: TEMPOS > 30 min (ex: "00:30:27, 00:39:55")
+      const temposStr = String(linha[6] || "").trim();
+      Logger.log("Tempos > 30 min: " + temposStr);
 
-      // Colunas: 5=TEMPOS>3min, 6=TEMPOS>10min, 7=TEMPOS>20min, 8=TEMPOS>30min
       const paradas = [];
 
-      // Parsear as colunas de tempos (assumindo formato: "00:10:30, 00:15:20")
-      const categorias = [
-        { coluna: 5, nome: "> 3 min", minDuracao: 180 },
-        { coluna: 6, nome: "> 10 min", minDuracao: 600 },
-        { coluna: 7, nome: "> 20 min", minDuracao: 1200 },
-        { coluna: 8, nome: "> 30 min", minDuracao: 1800 }
-      ];
+      if (temposStr && temposStr !== "-" && temposStr !== "") {
+        // Separar por vírgula
+        const tempos = temposStr.split(",");
 
-      categorias.forEach(cat => {
-        const valorColuna = String(linha[cat.coluna] || "").trim();
+        tempos.forEach((tempo, idx) => {
+          tempo = tempo.trim();
+          if (tempo && tempo.includes(":")) {
+            // Parsear HH:MM:SS
+            const partes = tempo.split(":");
+            const h = parseInt(partes[0]) || 0;
+            const m = parseInt(partes[1]) || 0;
+            const s = partes.length > 2 ? (parseInt(partes[2]) || 0) : 0;
+            const duracaoSeg = h * 3600 + m * 60 + s;
 
-        Logger.log("    Processando " + cat.nome + ": '" + valorColuna + "'");
-
-        if (valorColuna && valorColuna !== "-" && valorColuna !== "") {
-          // Parsear múltiplos tempos separados por vírgula
-          const tempos = valorColuna.split(",");
-
-          tempos.forEach(tempo => {
-            tempo = tempo.trim();
-            if (tempo && tempo.includes(":")) {
-              const partes = tempo.split(":");
-              if (partes.length >= 2) {
-                const h = parseInt(partes[0]) || 0;
-                const m = parseInt(partes[1]) || 0;
-                const s = partes.length > 2 ? (parseInt(partes[2]) || 0) : 0;
-                const duracaoSeg = h * 3600 + m * 60 + s;
-
-                // NÃO filtrar por duração - os valores JÁ vêm filtrados do gerarRelatorioTurnos()
-                // Adicionar TODOS os tempos da categoria
-                if (duracaoSeg > 0) {
-                  paradas.push({
-                    categoria: cat.nome,
-                    duracao: duracaoSeg,
-                    duracaoFmt: tempo,
-                    horario: "-" // Não temos horário específico no PAINEL
-                  });
-                  Logger.log("      ✓ Adicionada: " + tempo + " (" + duracaoSeg + "s)");
-                }
-              }
+            if (duracaoSeg > 0) {
+              paradas.push({
+                categoria: "> 30 min",
+                duracao: duracaoSeg,
+                duracaoFmt: tempo,
+                horario: "-"
+              });
+              Logger.log("  ✓ Parada #" + (idx + 1) + ": " + tempo);
             }
-          });
-        }
-      });
+          }
+        });
+      }
 
-      // Ordenar por duração (maior primeiro)
-      paradas.sort((a, b) => b.duracao - a.duracao);
-
-      Logger.log("  Total paradas encontradas: " + paradas.length);
-
+      Logger.log("Total paradas: " + paradas.length);
       return paradas;
     }
   }
 
+  Logger.log("⚠ Nenhuma linha encontrada");
   return [];
 }
 
@@ -273,206 +253,66 @@ function formatarSegundosParaHora(segundos) {
   return `${h}:${m}:${sec}`;
 }
 
-// === BUSCA HISTÓRICO ATUALIZADA (FILTRO POR PERÍODO) ===
-// Busca da aba "Página" que contém o histórico completo com motivos, serviços, etc.
+// === BUSCA HISTÓRICO SIMPLIFICADO ===
+// Busca na aba "Pagina": máquina + filtro de data (opcional)
 function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
 
-  Logger.log("DEBUG buscarHistorico:");
-  Logger.log("  Máquina: " + maquinaFiltro);
-  Logger.log("  Data Início: " + dataInicio);
-  Logger.log("  Data Fim: " + dataFim);
+  Logger.log("=== buscarHistorico ===");
+  Logger.log("Máquina: " + maquinaFiltro);
+  Logger.log("Data Início: " + dataInicio);
+  Logger.log("Data Fim: " + dataFim);
 
-  // Buscar da aba "Pagina" (sem acento) ou "Página" (com acento) - não PAINEL
-  const sheetPagina = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
-
-  if (!sheetPagina) {
-    Logger.log("  ⚠ Aba 'Página' não encontrada, usando PAINEL");
-    // Fallback: tentar PAINEL se Página não existir
-    return buscarHistoricoPainel(maquinaFiltro, dataInicio, dataFim);
-  }
-
-  Logger.log("  ✓ Usando aba: " + sheetPagina.getName());
-  const dados = sheetPagina.getDataRange().getValues();
-  Logger.log("  Total linhas: " + dados.length);
-  const resultados = [];
-  
-  // Prepara as datas de filtro (se existirem)
-  // Usa formato ISO com horário explícito para evitar problemas de timezone
-  let dInicio = null;
-  let dFim = null;
-
-  if (dataInicio) {
-    // Formato recebido: yyyy-MM-dd
-    // Converte para Date com horário do meio-dia para evitar problemas de timezone
-    dInicio = new Date(dataInicio + "T00:00:00");
-    Logger.log("  Data Início parseada: " + dInicio);
-    Logger.log("  Data Início (ISO): " + dInicio.toISOString());
-  }
-
-  if (dataFim) {
-    // Formato recebido: yyyy-MM-dd
-    dFim = new Date(dataFim + "T23:59:59");
-    Logger.log("  Data Fim parseada: " + dFim);
-    Logger.log("  Data Fim (ISO): " + dFim.toISOString());
-  }
-
-  // Estrutura da aba "Página":
-  // Col 0: MÁQUINAS
-  // Col 1: CUSTO MÃO DE OBRA
-  // Col 2: TURNO
-  // Col 3: DATA
-  // Col 4: LIGADA
-  // Col 5: DESLIGADA
-  // Col 6: TEMPOS > 30 min
-  // Col 7: MOTIVO DA PARADA
-  // Col 8: MOTIVO DA PARADA (duplicado)
-  // Col 9: SERVIÇOS REALIZADOS
-  // Col 10: PEÇAS TROCADAS
-  // Col 11: CUSTO DE PEÇAS
-  // Col 12: DATA DE FABRICAÇÃO OU COMPRA
-
-  for (let i = 1; i < dados.length; i++) {
-    let linha = dados[i];
-    let maqPagina = String(linha[0]).trim();
-
-    // Filtra pela máquina
-    if (maqPagina !== maquinaFiltro) continue;
-
-    // Filtra pela data (se houver filtro)
-    if (dInicio || dFim) {
-      let valorOriginal = linha[3];
-      let dataPagina = lerDataBR(valorOriginal); // Coluna 3 na aba Página
-
-      // Normalizar para comparação usando apenas a data (sem hora)
-      // Converte tudo para string dd/MM/yyyy para comparação consistente
-      let dataPaginaStr = Utilities.formatDate(dataPagina, ss.getSpreadsheetTimeZone(), "yyyy-MM-dd");
-      let dataPaginaNorm = new Date(dataPaginaStr + "T12:00:00");
-
-      // Debug: Log das primeiras 3 comparações
-      if (i <= 3) {
-        Logger.log("  [Linha " + i + "] Valor original col 3: " + valorOriginal + " (tipo: " + typeof valorOriginal + ")");
-        Logger.log("  [Linha " + i + "] Data convertida: " + dataPagina);
-        Logger.log("  [Linha " + i + "] Data normalizada (string): " + dataPaginaStr);
-        Logger.log("  [Linha " + i + "] Data normalizada (Date): " + dataPaginaNorm);
-        Logger.log("  [Linha " + i + "] dInicio: " + dInicio + ", dFim: " + dFim);
-
-        if (dInicio) {
-          Logger.log("  [Linha " + i + "] Comparação início: " + dataPaginaNorm + " < " + dInicio + " = " + (dataPaginaNorm < dInicio));
-        }
-        if (dFim) {
-          Logger.log("  [Linha " + i + "] Comparação fim: " + dataPaginaNorm + " > " + dFim + " = " + (dataPaginaNorm > dFim));
-        }
-      }
-
-      if (dInicio && dataPaginaNorm < dInicio) continue;
-      if (dFim && dataPaginaNorm > dFim) continue;
-    }
-
-    // Se passou, adiciona
-    resultados.push({
-      turno: linha[2],
-      data: Utilities.formatDate(lerDataBR(linha[3]), ss.getSpreadsheetTimeZone(), "dd/MM/yyyy"),
-      ligada: formatarHoraExcel(linha[4]),
-      desligada: formatarHoraExcel(linha[5]),
-      paradas3min: "-", // Não existe na aba Página
-      paradas10min: "-", // Não existe na aba Página
-      paradas20min: "-", // Não existe na aba Página
-      paradas30min: linha[6] || "-",
-      custoMO: typeof linha[1] === 'number' ? linha[1] : 0, // Coluna 1
-      motivo: linha[7] || linha[8] || "-", // Colunas 7 ou 8 (duplicadas)
-      servico: linha[9] || "-",
-      pecas: linha[10] || "-",
-      custoPecas: typeof linha[11] === 'number' ? linha[11] : 0,
-      obs: linha[12] || "-" // Data de fabricação como observação
-    });
-  }
-  
-  // Ordena por data decrescente (mais novo primeiro)
-  resultados.sort((a, b) => {
-    let da = lerDataBR(a.data);
-    let db = lerDataBR(b.data);
-    return db - da;
-  });
-
-  Logger.log("  Total registros encontrados: " + resultados.length);
-
-  return resultados;
-}
-
-// === BUSCA HISTÓRICO DA ABA PAINEL (FALLBACK) ===
-function buscarHistoricoPainel(maquinaFiltro, dataInicio, dataFim) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetPainel = ss.getSheetByName("PAINEL") || ss.getSheetByName("Painel");
-
-  Logger.log("DEBUG buscarHistoricoPainel (fallback):");
-  Logger.log("  Máquina: " + maquinaFiltro);
-
-  if (!sheetPainel) {
-    Logger.log("  ERRO: Aba PAINEL também não encontrada!");
+  if (!sheet) {
+    Logger.log("⚠ Aba 'Pagina' não encontrada");
     return [];
   }
 
-  Logger.log("  ✓ Usando aba: " + sheetPainel.getName());
-  const dados = sheetPainel.getDataRange().getValues();
-  Logger.log("  Total linhas: " + dados.length);
+  const dados = sheet.getDataRange().getValues();
+  const timezone = ss.getSpreadsheetTimeZone();
   const resultados = [];
 
-  let dInicio = null;
-  let dFim = null;
+  Logger.log("Total linhas: " + dados.length);
 
-  if (dataInicio) {
-    let p = dataInicio.split('-');
-    dInicio = new Date(p[0], p[1]-1, p[2]);
-    dInicio.setHours(0,0,0,0);
-  }
+  // Estrutura da aba "Pagina":
+  // Col 0: MÁQUINAS | Col 1: CUSTO MO | Col 2: TURNO | Col 3: DATA
+  // Col 4: LIGADA | Col 5: DESLIGADA | Col 6: TEMPOS > 30 min
+  // Col 7: MOTIVO | Col 8: MOTIVO(dup) | Col 9: SERVIÇOS
+  // Col 10: PEÇAS | Col 11: CUSTO PEÇAS | Col 12: DATA FAB
 
-  if (dataFim) {
-    let p = dataFim.split('-');
-    dFim = new Date(p[0], p[1]-1, p[2]);
-    dFim.setHours(23,59,59,999);
-  }
-
+  // Percorrer todas as linhas
   for (let i = 1; i < dados.length; i++) {
     let linha = dados[i];
-    let maqPainel = String(linha[0]).trim();
+    let maqLinha = String(linha[0]).trim();
 
-    if (maqPainel !== maquinaFiltro) continue;
+    // Filtro 1: Máquina
+    if (maqLinha !== maquinaFiltro) continue;
 
-    if (dInicio || dFim) {
-      let dataPainel = lerDataBR(linha[2]);
-      dataPainel.setHours(12,0,0,0);
+    // Filtro 2: Data (se fornecido)
+    let dataLinha = lerDataBR(linha[3]);
+    let dataLinhaStr = Utilities.formatDate(dataLinha, timezone, "yyyy-MM-dd");
 
-      if (dInicio && dataPainel < dInicio) continue;
-      if (dFim && dataPainel > dFim) continue;
-    }
+    if (dataInicio && dataLinhaStr < dataInicio) continue;
+    if (dataFim && dataLinhaStr > dataFim) continue;
 
+    // Passou nos filtros - adicionar ao resultado
     resultados.push({
-      turno: linha[1],
-      data: Utilities.formatDate(lerDataBR(linha[2]), ss.getSpreadsheetTimeZone(), "dd/MM/yyyy"),
-      ligada: formatarHoraExcel(linha[3]),
-      desligada: formatarHoraExcel(linha[4]),
-      paradas3min: linha[5] || "-",
-      paradas10min: linha[6] || "-",
-      paradas20min: linha[7] || "-",
-      paradas30min: linha[8] || "-",
-      custoMO: typeof linha[9] === 'number' ? linha[9] : 0,
-      motivo: "-",
-      servico: "-",
-      pecas: "-",
-      custoPecas: 0,
-      obs: "-"
+      turno: linha[2] || "-",
+      data: Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy"),
+      ligada: formatarHoraExcel(linha[4]),
+      desligada: formatarHoraExcel(linha[5]),
+      paradas30min: linha[6] || "-",
+      motivo: linha[7] || linha[8] || "-",
+      servico: linha[9] || "-",
+      pecas: linha[10] || "-",
+      custoMO: typeof linha[1] === 'number' ? linha[1] : 0,
+      custoPecas: typeof linha[11] === 'number' ? linha[11] : 0,
+      obs: linha[12] || "-"
     });
   }
 
-  resultados.sort((a, b) => {
-    let da = lerDataBR(a.data);
-    let db = lerDataBR(b.data);
-    return db - da;
-  });
-
-  Logger.log("  Total registros encontrados (PAINEL): " + resultados.length);
-
+  Logger.log("Registros encontrados: " + resultados.length);
   return resultados;
 }
 
