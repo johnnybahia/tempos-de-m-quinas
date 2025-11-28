@@ -298,19 +298,23 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
   const resultados = [];
   
   // Prepara as datas de filtro (se existirem)
+  // Usa formato ISO com horário explícito para evitar problemas de timezone
   let dInicio = null;
   let dFim = null;
 
   if (dataInicio) {
-    let p = dataInicio.split('-');
-    dInicio = new Date(p[0], p[1]-1, p[2]);
-    dInicio.setHours(0,0,0,0);
+    // Formato recebido: yyyy-MM-dd
+    // Converte para Date com horário do meio-dia para evitar problemas de timezone
+    dInicio = new Date(dataInicio + "T00:00:00");
+    Logger.log("  Data Início parseada: " + dInicio);
+    Logger.log("  Data Início (ISO): " + dInicio.toISOString());
   }
-  
+
   if (dataFim) {
-    let p = dataFim.split('-');
-    dFim = new Date(p[0], p[1]-1, p[2]);
-    dFim.setHours(23,59,59,999);
+    // Formato recebido: yyyy-MM-dd
+    dFim = new Date(dataFim + "T23:59:59");
+    Logger.log("  Data Fim parseada: " + dFim);
+    Logger.log("  Data Fim (ISO): " + dFim.toISOString());
   }
 
   // Estrutura da aba "Página":
@@ -337,11 +341,32 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
 
     // Filtra pela data (se houver filtro)
     if (dInicio || dFim) {
-      let dataPagina = lerDataBR(linha[3]); // Coluna 3 na aba Página
-      dataPagina.setHours(12,0,0,0);
+      let valorOriginal = linha[3];
+      let dataPagina = lerDataBR(valorOriginal); // Coluna 3 na aba Página
 
-      if (dInicio && dataPagina < dInicio) continue;
-      if (dFim && dataPagina > dFim) continue;
+      // Normalizar para comparação usando apenas a data (sem hora)
+      // Converte tudo para string dd/MM/yyyy para comparação consistente
+      let dataPaginaStr = Utilities.formatDate(dataPagina, ss.getSpreadsheetTimeZone(), "yyyy-MM-dd");
+      let dataPaginaNorm = new Date(dataPaginaStr + "T12:00:00");
+
+      // Debug: Log das primeiras 3 comparações
+      if (i <= 3) {
+        Logger.log("  [Linha " + i + "] Valor original col 3: " + valorOriginal + " (tipo: " + typeof valorOriginal + ")");
+        Logger.log("  [Linha " + i + "] Data convertida: " + dataPagina);
+        Logger.log("  [Linha " + i + "] Data normalizada (string): " + dataPaginaStr);
+        Logger.log("  [Linha " + i + "] Data normalizada (Date): " + dataPaginaNorm);
+        Logger.log("  [Linha " + i + "] dInicio: " + dInicio + ", dFim: " + dFim);
+
+        if (dInicio) {
+          Logger.log("  [Linha " + i + "] Comparação início: " + dataPaginaNorm + " < " + dInicio + " = " + (dataPaginaNorm < dInicio));
+        }
+        if (dFim) {
+          Logger.log("  [Linha " + i + "] Comparação fim: " + dataPaginaNorm + " > " + dFim + " = " + (dataPaginaNorm > dFim));
+        }
+      }
+
+      if (dInicio && dataPaginaNorm < dInicio) continue;
+      if (dFim && dataPaginaNorm > dFim) continue;
     }
 
     // Se passou, adiciona
@@ -695,14 +720,35 @@ function limparDadosAntigos() {
 // === AUXILIARES ===
 function lerDataBR(valor) {
   if (!valor) return new Date();
-  if (valor instanceof Date) return valor;
+
+  // Se já é um objeto Date válido, retornar diretamente
+  if (valor instanceof Date && !isNaN(valor.getTime())) {
+    return new Date(valor);
+  }
+
+  // Se é string, tentar parsear
   if (typeof valor === 'string') {
     let partes = valor.split('/');
-    if (partes.length === 3) return new Date(partes[2], partes[1]-1, partes[0]);
+    if (partes.length === 3) {
+      // Formato dd/MM/yyyy
+      return new Date(parseInt(partes[2]), parseInt(partes[1])-1, parseInt(partes[0]));
+    }
     partes = valor.split('-');
-    if (partes.length === 3) return new Date(partes[0], partes[1]-1, partes[2]);
+    if (partes.length === 3) {
+      // Formato yyyy-MM-dd
+      return new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
+    }
   }
-  return new Date(); 
+
+  // Fallback: tentar converter diretamente
+  try {
+    const d = new Date(valor);
+    if (!isNaN(d.getTime())) return d;
+  } catch (e) {
+    // Ignorar erro
+  }
+
+  return new Date();
 }
 function parseDuration(raw) {
   if (typeof raw === 'number') return raw;
@@ -853,6 +899,69 @@ function testarFuncoes() {
     }
   } else {
     Logger.log("  ⚠ Aba 'Página' ou 'Pagina' NÃO ENCONTRADA");
+  }
+
+  Logger.log("\n=== FIM DO TESTE ===");
+}
+
+// Função para testar busca histórica com datas específicas
+function testarBuscaHistorica() {
+  Logger.log("=== TESTE DE BUSCA HISTÓRICA ===");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const pagina = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
+
+  if (!pagina) {
+    Logger.log("⚠ Aba 'Página' não encontrada!");
+    return;
+  }
+
+  Logger.log("\n1. DADOS NA ABA PÁGINA:");
+  const dados = pagina.getDataRange().getValues();
+  Logger.log("  Total de linhas: " + dados.length);
+
+  // Mostra as primeiras 5 linhas com foco na data
+  Logger.log("\n  Primeiras 5 linhas (Máquina | Turno | Data):");
+  for (let i = 1; i < Math.min(6, dados.length); i++) {
+    let maq = dados[i][0];
+    let turno = dados[i][2];
+    let dataVal = dados[i][3];
+    let dataConvertida = lerDataBR(dataVal);
+
+    Logger.log("    Linha " + i + ":");
+    Logger.log("      Máquina: " + maq);
+    Logger.log("      Turno: " + turno);
+    Logger.log("      Data original: " + dataVal + " (tipo: " + typeof dataVal + ")");
+    Logger.log("      Data convertida: " + dataConvertida);
+    Logger.log("      Data formatada: " + Utilities.formatDate(dataConvertida, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy HH:mm:ss"));
+  }
+
+  // Testa busca com data de hoje
+  Logger.log("\n2. TESTE DE BUSCA COM DATA DE HOJE:");
+  const hoje = new Date();
+  const hojeStr = Utilities.formatDate(hoje, ss.getSpreadsheetTimeZone(), "yyyy-MM-dd");
+  Logger.log("  Data de hoje: " + hojeStr);
+
+  // Pega a primeira máquina da aba para teste
+  const maquinaTeste = dados.length > 1 ? String(dados[1][0]).trim() : "";
+  if (maquinaTeste) {
+    Logger.log("  Testando com máquina: " + maquinaTeste);
+    const resultado = buscarHistorico(maquinaTeste, hojeStr, hojeStr);
+    Logger.log("  Resultados encontrados: " + resultado.length);
+    if (resultado.length > 0) {
+      Logger.log("  Primeiro resultado: " + JSON.stringify(resultado[0]));
+    }
+  }
+
+  // Testa busca sem filtro de data
+  Logger.log("\n3. TESTE DE BUSCA SEM FILTRO DE DATA:");
+  if (maquinaTeste) {
+    const resultadoTotal = buscarHistorico(maquinaTeste, null, null);
+    Logger.log("  Resultados encontrados: " + resultadoTotal.length);
+    if (resultadoTotal.length > 0) {
+      Logger.log("  Primeira data: " + resultadoTotal[0].data);
+      Logger.log("  Última data: " + resultadoTotal[resultadoTotal.length - 1].data);
+    }
   }
 
   Logger.log("\n=== FIM DO TESTE ===");

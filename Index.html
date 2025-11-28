@@ -44,7 +44,7 @@
       .card.rodando::before { background: var(--success); }
       .card.parada::before { background: var(--danger); }
       
-      .card-title { font-size: 14px; font-weight: bold; color: #333; margin-bottom: 10px; min-height: 35px; display: flex; align-items: center; line-height: 1.2; cursor: pointer; }
+      .card-title { font-size: 14px; font-weight: bold; color: #333; margin-bottom: 10px; min-height: 35px; display: flex; align-items: center; line-height: 1.2; cursor: pointer; user-select: none; }
       .card-status { font-size: 12px; font-weight: bold; color: white; padding: 4px 10px; border-radius: 4px; display: inline-block; margin-bottom: 10px; text-transform: uppercase; align-self: flex-start; }
       .card-timer { font-size: 32px; font-family: 'Courier New', monospace; color: var(--dark); font-weight: 700; margin-bottom: 15px; }
       
@@ -306,12 +306,14 @@
 
               const card = document.createElement('div');
               card.className = `card ${classe}`;
+              card.setAttribute('data-maquina', maq.nome);
+              card.setAttribute('data-turno', maq.turnoAtual);
 
               const ultimoEvento = new Date(maq.timestamp);
               const debugInfo = `Último: ${ultimoEvento.toLocaleTimeString('pt-BR')} - ${maq.ultimoEvento}`;
 
               card.innerHTML = `
-                <div class="card-title" onclick="abrirModal('${maq.nome}', '${maq.turnoAtual}')">${maq.nome}</div>
+                <div class="card-title">${maq.nome}</div>
                 <div class="card-status" style="background:${cor}">${estadoTxt}</div>
                 <div class="card-timer">${tempoFmt}</div>
                 <div style="font-size:9px; color:#999; text-align:center; margin-bottom:8px;" title="${debugInfo}">
@@ -321,11 +323,28 @@
                   <div class="daily-row"><span class="daily-val-prod">Produzindo: ${prodDia}</span></div>
                   <div class="daily-row"><span class="daily-val-stop">Parado: ${stopDia}</span></div>
                 </div>
-                <button class="btn-stops" onclick="toggleStops('${safeName}', '${maq.nome}')">⏱️ Ver Paradas</button>
+                <button class="btn-stops" data-safename="${safeName}">⏱️ Ver Paradas</button>
                 <div id="stops-${safeName}" class="stops-list"></div>
                 <div class="card-turno">${maq.turnoAtual}</div>
-                <div class="card-footer-hint" onclick="abrirModal('${maq.nome}', '${maq.turnoAtual}')">👆 Toque para detalhes</div>
+                <div class="card-footer-hint">👆 Toque para detalhes</div>
               `;
+
+              // Adicionar event listeners após inserir HTML
+              const btnStops = card.querySelector('.btn-stops');
+              btnStops.addEventListener('click', function() {
+                toggleStops(this.getAttribute('data-safename'), card.getAttribute('data-maquina'));
+              });
+
+              const titleEl = card.querySelector('.card-title');
+              titleEl.addEventListener('click', function() {
+                abrirModal(card.getAttribute('data-maquina'), card.getAttribute('data-turno'));
+              });
+
+              const footerEl = card.querySelector('.card-footer-hint');
+              footerEl.addEventListener('click', function() {
+                abrirModal(card.getAttribute('data-maquina'), card.getAttribute('data-turno'));
+              });
+
               grid.appendChild(card);
            });
 
