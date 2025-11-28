@@ -161,6 +161,82 @@ function buscarDadosTempoReal() {
   return statusMaquinas;
 }
 
+// === BUSCA PARADAS DETALHADAS DO TURNO ATUAL ===
+function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetDados = ss.getSheetByName("Página1");
+  if (!sheetDados) return [];
+
+  const dados = sheetDados.getDataRange().getValues();
+  const sheetTurnos = ss.getSheetByName("TURNOS");
+  const dadosTurnos = sheetTurnos.getDataRange().getValues();
+  const configTurnos = {};
+
+  for (let i = 1; i < dadosTurnos.length; i++) {
+    configTurnos[String(dadosTurnos[i][0]).trim()] = [
+       { nome: "Turno 1", inicio: dadosTurnos[i][1], fim: dadosTurnos[i][2] },
+       { nome: "Turno 2", inicio: dadosTurnos[i][3], fim: dadosTurnos[i][4] },
+       { nome: "Turno 3", inicio: dadosTurnos[i][5], fim: dadosTurnos[i][6] }
+    ];
+  }
+
+  const paradas = [];
+  const dataProd = new Date(dataProducao);
+
+  for (let i = dados.length - 1; i > 0; i--) {
+    let linha = dados[i];
+    let maqLinha = String(linha[2]).trim();
+
+    if (maqLinha !== maquina) continue;
+    if (linha[3] !== "TEMPO PARADA") continue;
+
+    let dataReg = lerDataBR(linha[0]);
+    let horaRegObj = new Date(linha[1]);
+
+    if (!isNaN(dataReg.getTime()) && !isNaN(horaRegObj.getTime())) {
+      let fullDateReg = new Date(dataReg);
+      fullDateReg.setHours(horaRegObj.getHours(), horaRegObj.getMinutes(), horaRegObj.getSeconds());
+
+      let infoTurnoReg = descobrirTurnoCompleto(fullDateReg, maquina, configTurnos);
+
+      if (infoTurnoReg && infoTurnoReg.nome === turnoNome) {
+        let dataProdReg = new Date(dataReg);
+        if (infoTurnoReg.cruzaMeiaNoite) {
+           let h = fullDateReg.getHours();
+           let hIni = Math.floor(infoTurnoReg.minInicio / 60);
+           if (h < hIni) dataProdReg.setDate(dataProdReg.getDate() - 1);
+        }
+        dataProdReg.setHours(0,0,0,0);
+
+        if (dataProdReg.getTime() === dataProd) {
+          let duracao = parseDuration(linha[4]);
+          if (duracao > 180) { // Apenas paradas > 3 minutos
+            paradas.push({
+              horario: Utilities.formatDate(fullDateReg, ss.getSpreadsheetTimeZone(), "HH:mm:ss"),
+              duracao: duracao,
+              duracaoFmt: formatarSegundosParaHora(duracao)
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Ordena por horário (mais recente primeiro)
+  paradas.sort((a, b) => b.horario.localeCompare(a.horario));
+
+  return paradas;
+}
+
+function formatarSegundosParaHora(segundos) {
+  if (typeof segundos !== 'number' || isNaN(segundos)) return "00:00:00";
+  segundos = Math.round(segundos);
+  const h = Math.floor(segundos/3600).toString().padStart(2,'0');
+  const m = Math.floor((segundos%3600)/60).toString().padStart(2,'0');
+  const sec = (segundos%60).toString().padStart(2,'0');
+  return `${h}:${m}:${sec}`;
+}
+
 // === BUSCA HISTÓRICO ATUALIZADA (FILTRO POR PERÍODO) ===
 function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
