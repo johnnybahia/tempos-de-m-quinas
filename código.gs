@@ -219,6 +219,8 @@ function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
       categorias.forEach(cat => {
         const valorColuna = String(linha[cat.coluna] || "").trim();
 
+        Logger.log("    Processando " + cat.nome + ": '" + valorColuna + "'");
+
         if (valorColuna && valorColuna !== "-" && valorColuna !== "") {
           // Parsear múltiplos tempos separados por vírgula
           const tempos = valorColuna.split(",");
@@ -233,13 +235,16 @@ function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
                 const s = partes.length > 2 ? (parseInt(partes[2]) || 0) : 0;
                 const duracaoSeg = h * 3600 + m * 60 + s;
 
-                if (duracaoSeg >= cat.minDuracao) {
+                // NÃO filtrar por duração - os valores JÁ vêm filtrados do gerarRelatorioTurnos()
+                // Adicionar TODOS os tempos da categoria
+                if (duracaoSeg > 0) {
                   paradas.push({
                     categoria: cat.nome,
                     duracao: duracaoSeg,
                     duracaoFmt: tempo,
                     horario: "-" // Não temos horário específico no PAINEL
                   });
+                  Logger.log("      ✓ Adicionada: " + tempo + " (" + duracaoSeg + "s)");
                 }
               }
             }
@@ -278,8 +283,8 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
   Logger.log("  Data Início: " + dataInicio);
   Logger.log("  Data Fim: " + dataFim);
 
-  // Buscar da aba "Página" ou "Pagina" (não PAINEL)
-  const sheetPagina = ss.getSheetByName("Página") || ss.getSheetByName("Pagina");
+  // Buscar da aba "Pagina" (sem acento) ou "Página" (com acento) - não PAINEL
+  const sheetPagina = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
 
   if (!sheetPagina) {
     Logger.log("  ⚠ Aba 'Página' não encontrada, usando PAINEL");
@@ -827,15 +832,25 @@ function testarFuncoes() {
     }
   }
 
-  // 3. Verificar aba Página
-  Logger.log("\n3. ESTRUTURA ABA PÁGINA:");
-  const pagina = ss.getSheetByName("Página") || ss.getSheetByName("Pagina");
+  // 3. Verificar aba Página/Pagina
+  Logger.log("\n3. ESTRUTURA ABA PÁGINA/PAGINA:");
+  const pagina = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
   if (pagina) {
+    Logger.log("  ✓ Encontrada: " + pagina.getName());
     const cabecalho = pagina.getRange(1, 1, 1, 13).getValues()[0];
     Logger.log("  Cabeçalhos:");
     cabecalho.forEach((col, idx) => {
       Logger.log("    Col " + idx + ": " + col);
     });
+
+    // Primeira linha de dados
+    if (pagina.getLastRow() > 1) {
+      Logger.log("  Primeira linha de dados:");
+      const primeiraLinha = pagina.getRange(2, 1, 1, 13).getValues()[0];
+      primeiraLinha.forEach((val, idx) => {
+        Logger.log("    Col " + idx + ": " + val);
+      });
+    }
   } else {
     Logger.log("  ⚠ Aba 'Página' ou 'Pagina' NÃO ENCONTRADA");
   }
