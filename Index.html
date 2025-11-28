@@ -250,8 +250,9 @@
            grupos[fam].push({nome, ...info});
 
            totalMaquinas++;
-           if (info.ultimoEvento === "TEMPO PRODUZINDO") totalRodando++;
-           else if (info.ultimoEvento === "TEMPO PARADA") totalParadas++;
+           // LÓGICA INVERTIDA: "TEMPO PARADA" = está rodando agora
+           if (info.ultimoEvento === "TEMPO PARADA") totalRodando++;
+           else if (info.ultimoEvento === "TEMPO PRODUZINDO") totalParadas++;
         });
 
         // Atualizar badges de estatísticas
@@ -285,11 +286,14 @@
               let classe = "parada";
               let cor = "#777";
 
-              if (maq.ultimoEvento === "TEMPO PRODUZINDO") {
+              // LÓGICA INVERTIDA: O último evento indica o que TERMINOU, não o que está acontecendo
+              // "TEMPO PARADA" = acabou a parada, agora está RODANDO
+              // "TEMPO PRODUZINDO" = acabou de produzir, agora está PARADA
+              if (maq.ultimoEvento === "TEMPO PARADA") {
                  estadoTxt = "RODANDO";
                  classe = "rodando";
                  cor = "#28a745";
-              } else if (maq.ultimoEvento === "TEMPO PARADA") {
+              } else if (maq.ultimoEvento === "TEMPO PRODUZINDO") {
                  estadoTxt = "PARADA";
                  classe = "parada";
                  cor = "#dc3545";

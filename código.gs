@@ -251,13 +251,18 @@ function formatarSegundosParaHora(segundos) {
 }
 
 // === BUSCA HISTÓRICO ATUALIZADA (FILTRO POR PERÍODO) ===
+// Busca da aba "Página" que contém o histórico completo com motivos, serviços, etc.
 function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetPainel = ss.getSheetByName("PAINEL") || ss.getSheetByName("Painel") || ss.getSheetByName("Página") || ss.getSheetByName("Pagina");
-  
-  if (!sheetPainel) return [];
-  
-  const dados = sheetPainel.getDataRange().getValues();
+  // Buscar da aba "Página" ou "Pagina" (não PAINEL)
+  const sheetPagina = ss.getSheetByName("Página") || ss.getSheetByName("Pagina");
+
+  if (!sheetPagina) {
+    // Fallback: tentar PAINEL se Página não existir
+    return buscarHistoricoPainel(maquinaFiltro, dataInicio, dataFim);
+  }
+
+  const dados = sheetPagina.getDataRange().getValues();
   const resultados = [];
   
   // Prepara as datas de filtro (se existirem)
@@ -276,42 +281,123 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
     dFim.setHours(23,59,59,999);
   }
 
+  // Estrutura da aba "Página":
+  // Col 0: MÁQUINAS
+  // Col 1: CUSTO MÃO DE OBRA
+  // Col 2: TURNO
+  // Col 3: DATA
+  // Col 4: LIGADA
+  // Col 5: DESLIGADA
+  // Col 6: TEMPOS > 30 min
+  // Col 7: MOTIVO DA PARADA
+  // Col 8: MOTIVO DA PARADA (duplicado)
+  // Col 9: SERVIÇOS REALIZADOS
+  // Col 10: PEÇAS TROCADAS
+  // Col 11: CUSTO DE PEÇAS
+  // Col 12: DATA DE FABRICAÇÃO OU COMPRA
+
   for (let i = 1; i < dados.length; i++) {
     let linha = dados[i];
-    let maqPainel = String(linha[0]).trim();
-    
+    let maqPagina = String(linha[0]).trim();
+
     // Filtra pela máquina
-    if (maqPainel !== maquinaFiltro) continue;
+    if (maqPagina !== maquinaFiltro) continue;
 
     // Filtra pela data (se houver filtro)
     if (dInicio || dFim) {
+      let dataPagina = lerDataBR(linha[3]); // Coluna 3 na aba Página
+      dataPagina.setHours(12,0,0,0);
+
+      if (dInicio && dataPagina < dInicio) continue;
+      if (dFim && dataPagina > dFim) continue;
+    }
+
+    // Se passou, adiciona
+    resultados.push({
+      turno: linha[2],
+      data: Utilities.formatDate(lerDataBR(linha[3]), ss.getSpreadsheetTimeZone(), "dd/MM/yyyy"),
+      ligada: formatarHoraExcel(linha[4]),
+      desligada: formatarHoraExcel(linha[5]),
+      paradas3min: "-", // Não existe na aba Página
+      paradas10min: "-", // Não existe na aba Página
+      paradas20min: "-", // Não existe na aba Página
+      paradas30min: linha[6] || "-",
+      custoMO: typeof linha[1] === 'number' ? linha[1] : 0, // Coluna 1
+      motivo: linha[7] || linha[8] || "-", // Colunas 7 ou 8 (duplicadas)
+      servico: linha[9] || "-",
+      pecas: linha[10] || "-",
+      custoPecas: typeof linha[11] === 'number' ? linha[11] : 0,
+      obs: linha[12] || "-" // Data de fabricação como observação
+    });
+  }
+  
+  // Ordena por data decrescente (mais novo primeiro)
+  resultados.sort((a, b) => {
+    let da = lerDataBR(a.data);
+    let db = lerDataBR(b.data);
+    return db - da;
+  });
+
+  return resultados;
+}
+
+// === BUSCA HISTÓRICO DA ABA PAINEL (FALLBACK) ===
+function buscarHistoricoPainel(maquinaFiltro, dataInicio, dataFim) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetPainel = ss.getSheetByName("PAINEL") || ss.getSheetByName("Painel");
+
+  if (!sheetPainel) return [];
+
+  const dados = sheetPainel.getDataRange().getValues();
+  const resultados = [];
+
+  let dInicio = null;
+  let dFim = null;
+
+  if (dataInicio) {
+    let p = dataInicio.split('-');
+    dInicio = new Date(p[0], p[1]-1, p[2]);
+    dInicio.setHours(0,0,0,0);
+  }
+
+  if (dataFim) {
+    let p = dataFim.split('-');
+    dFim = new Date(p[0], p[1]-1, p[2]);
+    dFim.setHours(23,59,59,999);
+  }
+
+  for (let i = 1; i < dados.length; i++) {
+    let linha = dados[i];
+    let maqPainel = String(linha[0]).trim();
+
+    if (maqPainel !== maquinaFiltro) continue;
+
+    if (dInicio || dFim) {
       let dataPainel = lerDataBR(linha[2]);
-      dataPainel.setHours(12,0,0,0); // Evita problema de fuso ajustando para meio dia
+      dataPainel.setHours(12,0,0,0);
 
       if (dInicio && dataPainel < dInicio) continue;
       if (dFim && dataPainel > dFim) continue;
     }
 
-    // Se passou, adiciona
     resultados.push({
       turno: linha[1],
-      data: Utilities.formatDate(lerDataBR(linha[2]), ss.getSpreadsheetTimeZone(), "dd/MM/yyyy"), // Retorna a data formatada
+      data: Utilities.formatDate(lerDataBR(linha[2]), ss.getSpreadsheetTimeZone(), "dd/MM/yyyy"),
       ligada: formatarHoraExcel(linha[3]),
       desligada: formatarHoraExcel(linha[4]),
-      paradas3min: linha[5],
-      paradas10min: linha[6],
-      paradas20min: linha[7],
-      paradas30min: linha[8],
+      paradas3min: linha[5] || "-",
+      paradas10min: linha[6] || "-",
+      paradas20min: linha[7] || "-",
+      paradas30min: linha[8] || "-",
       custoMO: typeof linha[9] === 'number' ? linha[9] : 0,
-      motivo: linha[10] || "-",
-      servico: linha[11] || "-",
-      pecas: linha[12] || "-",
-      custoPecas: typeof linha[13] === 'number' ? linha[13] : 0,
-      obs: linha[14] || "-"
+      motivo: "-",
+      servico: "-",
+      pecas: "-",
+      custoPecas: 0,
+      obs: "-"
     });
   }
-  
-  // Ordena por data decrescente (mais novo primeiro)
+
   resultados.sort((a, b) => {
     let da = lerDataBR(a.data);
     let db = lerDataBR(b.data);
