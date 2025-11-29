@@ -596,25 +596,37 @@
               ${maq.nome}
             </div>
             <div class="table-wrapper">
-              <table style="width:100%; border-collapse:collapse; font-size:13px;">
+              <table style="width:100%; border-collapse:collapse; font-size:12px;">
                 <thead>
                   <tr style="background:#f8f9fa;">
-                    <th style="padding:10px; border:1px solid #ddd; text-align:left;">Data</th>
-                    <th style="padding:10px; border:1px solid #ddd; text-align:center;">Turno</th>
-                    <th style="padding:10px; border:1px solid #ddd; text-align:center; background:#e8f5e9;">Tempo Rodando</th>
-                    <th style="padding:10px; border:1px solid #ddd; text-align:center; background:#ffebee;">Tempo Parado</th>
-                    <th style="padding:10px; border:1px solid #ddd; text-align:left; background:#fff3e0;">Paradas Críticas (>3min)</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:left;">Data</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:center;">Turno</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:center; background:#e8f5e9;">Tempo Ligada</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:center; background:#ffebee;">Tempo Parada</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:left; background:#fff3e0;">Paradas > 3min</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:center;">Custo MO</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:left;">Motivo</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:left;">Serviço</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:left;">Peças</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:center;">Custo Peças</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:left;">Obs</th>
                   </tr>
                 </thead>
                 <tbody>`;
 
           maq.turnos.forEach(turno => {
             html += `<tr>
-              <td style="padding:8px; border:1px solid #ddd;">${turno.data}</td>
-              <td style="padding:8px; border:1px solid #ddd; text-align:center;">${turno.turno}</td>
-              <td style="padding:8px; border:1px solid #ddd; text-align:center; color:#28a745; font-weight:bold;">${turno.rodando}</td>
-              <td style="padding:8px; border:1px solid #ddd; text-align:center; color:#dc3545; font-weight:bold;">${turno.parado}</td>
-              <td style="padding:8px; border:1px solid #ddd; font-size:11px; color:#ff8c00;">${turno.paradasCriticas}</td>
+              <td style="padding:8px; border:1px solid #ddd; font-weight:500;">${turno.data}</td>
+              <td style="padding:8px; border:1px solid #ddd; text-align:center;"><span style="background:#e3f2fd; padding:4px 8px; border-radius:3px; font-weight:bold; font-size:11px;">${turno.turno}</span></td>
+              <td style="padding:8px; border:1px solid #ddd; text-align:center; color:#2e7d32; font-weight:bold; background:#f1f8f4;">${turno.ligada}</td>
+              <td style="padding:8px; border:1px solid #ddd; text-align:center; color:#c62828; font-weight:bold; background:#fef5f5;">${turno.desligada}</td>
+              <td style="padding:8px; border:1px solid #ddd; font-size:10px; color:#e65100; font-weight:bold; background:#fff8f0;">${turno.paradas3min}</td>
+              <td style="padding:8px; border:1px solid #ddd; font-weight:bold; text-align:right;">${typeof turno.custoMO === 'number' ? 'R$ '+turno.custoMO.toFixed(2) : turno.custoMO}</td>
+              <td style="padding:8px; border:1px solid #ddd; font-size:11px;">${turno.motivo}</td>
+              <td style="padding:8px; border:1px solid #ddd; font-size:11px;">${turno.servico || '-'}</td>
+              <td style="padding:8px; border:1px solid #ddd; font-size:11px;">${turno.pecas}</td>
+              <td style="padding:8px; border:1px solid #ddd; font-weight:500; text-align:right;">${typeof turno.custoPecas === 'number' ? 'R$ '+turno.custoPecas.toFixed(2) : (turno.custoPecas || '-')}</td>
+              <td style="padding:8px; border:1px solid #ddd; font-size:11px; max-width:200px; white-space:normal;">${turno.obs}</td>
             </tr>`;
           });
 
