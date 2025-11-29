@@ -402,7 +402,7 @@
              return;
            }
 
-           let html = '<div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center;">';
+           let html = '<div style="display:grid; grid-template-columns:repeat(5, 1fr); gap:10px;">';
 
            paradas.forEach(p => {
              let corDuracao = '#666';
@@ -421,9 +421,9 @@
                icone = '⚠️';
              }
 
-             html += `<div style="background:white; border:2px solid ${corDuracao}; border-radius:8px; padding:12px 16px; min-width:90px; text-align:center; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+             html += `<div style="background:white; border:2px solid ${corDuracao}; border-radius:8px; padding:12px 8px; text-align:center; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
                <div style="font-size:20px; margin-bottom:4px;">${icone}</div>
-               <div style="color:${corDuracao}; font-weight:bold; font-size:16px;">${p.duracaoFmt}</div>
+               <div style="color:${corDuracao}; font-weight:bold; font-size:14px;">${p.duracaoFmt}</div>
              </div>`;
            });
 
