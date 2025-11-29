@@ -258,6 +258,113 @@ function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
   return [];
 }
 
+// === BUSCA RELATÓRIO POR FAMÍLIA ===
+function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetPainel = ss.getSheetByName("PAINEL");
+
+  if (!sheetPainel) {
+    Logger.log("ERRO: Aba PAINEL não encontrada");
+    return { erro: "Aba PAINEL não encontrada" };
+  }
+
+  const dados = sheetPainel.getDataRange().getValues();
+  const timezone = ss.getSpreadsheetTimeZone();
+
+  Logger.log("=== buscarRelatorioFamilia ===");
+  Logger.log("Família: " + familia);
+  Logger.log("Período: " + dataInicio + " até " + dataFim);
+
+  // Estrutura da aba PAINEL:
+  // Col 0: MÁQUINAS | Col 1: TURNO | Col 2: DATA
+  // Col 3: LIGADA | Col 4: DESLIGADA
+  // Col 5: TEMPOS > 3 min | Col 6: TEMPOS > 10 min | ...
+
+  const maquinasPorFamilia = {};
+  let totalRodandoSeg = 0;
+  let totalParadoSeg = 0;
+  let totalParadasCriticas = 0;
+
+  // Percorrer dados do PAINEL
+  for (let i = 1; i < dados.length; i++) {
+    const linha = dados[i];
+    const nomeMaquina = String(linha[0]).trim();
+
+    // Verificar se pertence à família (por substring no nome)
+    if (!nomeMaquina.toUpperCase().includes(familia.toUpperCase())) {
+      continue;
+    }
+
+    const turno = String(linha[1]).trim();
+    const dataLinha = lerDataBR(linha[2]);
+    const dataLinhaStr = Utilities.formatDate(dataLinha, timezone, "yyyy-MM-dd");
+
+    // Filtrar por data
+    if (dataInicio && dataLinhaStr < dataInicio) continue;
+    if (dataFim && dataLinhaStr > dataFim) continue;
+
+    // Extrair dados
+    const ligada = linha[3]; // Fração de dia
+    const desligada = linha[4]; // Fração de dia
+    const paradasCriticas = String(linha[5] || "").trim(); // "00:05:30, 00:12:00, ..."
+
+    // Converter frações de dia para segundos
+    const ligadaSeg = typeof ligada === 'number' ? Math.round(ligada * 86400) : 0;
+    const desligadaSeg = typeof desligada === 'number' ? Math.round(desligada * 86400) : 0;
+
+    // Contar paradas críticas (separadas por vírgula)
+    let qtdParadas = 0;
+    if (paradasCriticas && paradasCriticas !== "-") {
+      qtdParadas = paradasCriticas.split(",").filter(p => p.trim().length > 0).length;
+    }
+
+    // Acumular totais
+    totalRodandoSeg += ligadaSeg;
+    totalParadoSeg += desligadaSeg;
+    totalParadasCriticas += qtdParadas;
+
+    // Agrupar por máquina
+    if (!maquinasPorFamilia[nomeMaquina]) {
+      maquinasPorFamilia[nomeMaquina] = [];
+    }
+
+    maquinasPorFamilia[nomeMaquina].push({
+      data: Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy"),
+      turno: turno,
+      rodando: formatarHoraExcel(ligada),
+      parado: formatarHoraExcel(desligada),
+      paradasCriticas: paradasCriticas === "-" ? "-" : paradasCriticas
+    });
+  }
+
+  // Montar resultado
+  const maquinas = [];
+  for (let nomeMaq in maquinasPorFamilia) {
+    maquinas.push({
+      nome: nomeMaq,
+      turnos: maquinasPorFamilia[nomeMaq]
+    });
+  }
+
+  // Ordenar máquinas por nome
+  maquinas.sort((a, b) => a.nome.localeCompare(b.nome));
+
+  Logger.log("Total máquinas encontradas: " + maquinas.length);
+  Logger.log("Total paradas críticas: " + totalParadasCriticas);
+
+  return {
+    familia: familia,
+    dataInicio: dataInicio.split('-').reverse().join('/'),
+    dataFim: dataFim.split('-').reverse().join('/'),
+    totais: {
+      rodando: formatarSegundosParaHora(totalRodandoSeg),
+      parado: formatarSegundosParaHora(totalParadoSeg),
+      paradasCriticas: totalParadasCriticas
+    },
+    maquinas: maquinas
+  };
+}
+
 function formatarSegundosParaHora(segundos) {
   if (typeof segundos !== 'number' || isNaN(segundos)) return "00:00:00";
   segundos = Math.round(segundos);
