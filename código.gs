@@ -324,6 +324,12 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
 
     // Passou nos filtros - adicionar ao resultado
     try {
+      // Debug: ver valores brutos das colunas de tempo
+      if (i === 1) { // Apenas primeira linha para não encher os logs
+        Logger.log("  DEBUG Col 4 (LIGADA): " + linha[4] + " (tipo: " + typeof linha[4] + ")");
+        Logger.log("  DEBUG Col 5 (DESLIGADA): " + linha[5] + " (tipo: " + typeof linha[5] + ")");
+      }
+
       const registro = {
         turno: String(linha[2] || "-"),
         data: Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy"),
@@ -340,6 +346,10 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
         custoPecas: typeof linha[14] === 'number' ? linha[14] : 0,
         obs: String(linha[15] || "-")
       };
+
+      if (i === 1) {
+        Logger.log("  DEBUG Após formatação - ligada: " + registro.ligada + ", desligada: " + registro.desligada);
+      }
 
       resultados.push(registro);
       Logger.log("  → Registro adicionado: " + registro.data + " | " + registro.turno);
