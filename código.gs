@@ -328,6 +328,7 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
       if (i === 1) { // Apenas primeira linha para não encher os logs
         Logger.log("  DEBUG Col 4 (LIGADA): " + linha[4] + " (tipo: " + typeof linha[4] + ")");
         Logger.log("  DEBUG Col 5 (DESLIGADA): " + linha[5] + " (tipo: " + typeof linha[5] + ")");
+        Logger.log("  DEBUG Col 6 (PARADAS >3): " + linha[6] + " (tipo: " + typeof linha[6] + ")");
       }
 
       const registro = {
@@ -335,10 +336,10 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
         data: Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy"),
         ligada: formatarHoraExcel(linha[4]),
         desligada: formatarHoraExcel(linha[5]),
-        paradas3min: String(linha[6] || "-"),
-        paradas10min: String(linha[7] || "-"),
-        paradas20min: String(linha[8] || "-"),
-        paradas30min: String(linha[9] || "-"),
+        paradas3min: formatarCelulaParada(linha[6]),
+        paradas10min: formatarCelulaParada(linha[7]),
+        paradas20min: formatarCelulaParada(linha[8]),
+        paradas30min: formatarCelulaParada(linha[9]),
         motivo: String(linha[10] || linha[11] || "-"),
         servico: String(linha[12] || "-"),
         pecas: String(linha[13] || "-"),
@@ -348,7 +349,10 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
       };
 
       if (i === 1) {
-        Logger.log("  DEBUG Após formatação - ligada: " + registro.ligada + ", desligada: " + registro.desligada);
+        Logger.log("  DEBUG Após formatação:");
+        Logger.log("    ligada: " + registro.ligada);
+        Logger.log("    desligada: " + registro.desligada);
+        Logger.log("    paradas3min: " + registro.paradas3min);
       }
 
       resultados.push(registro);
@@ -662,6 +666,14 @@ function descobrirTurnoCompleto(hora, maq, config) {
   return null;
 }
 function formatarHoraExcel(val) {
+  // Se é um Date object (Google Sheets armazena horários como Date)
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    const h = val.getHours();
+    const m = val.getMinutes();
+    const s = val.getSeconds();
+    return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+  }
+
   // Se já é uma string formatada (ex: "1:30:14"), retorna direto
   if (typeof val === 'string' && val.includes(':')) {
     return val;
@@ -676,6 +688,19 @@ function formatarHoraExcel(val) {
 
   // Caso padrão
   return "00:00:00";
+}
+
+// Formata valores que podem ser strings ou Date objects
+function formatarCelulaParada(val) {
+  if (!val || val === "" || val === "-") return "-";
+
+  // Se é Date object, formatar
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return formatarHoraExcel(val);
+  }
+
+  // Se já é string, retornar direto
+  return String(val);
 }
 function processarRegistro(resumo, ss, maquina, data, turno, evento, segundos) {
   if (segundos > 86400) return;
