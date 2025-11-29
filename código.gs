@@ -357,9 +357,18 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
     maquinasPorFamilia[nomeMaquina].push({
       data: Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy"),
       turno: turno,
-      rodando: formatarHoraExcel(ligada),
-      parado: formatarHoraExcel(desligada),
-      paradasCriticas: formatarCelulaParada(linha[6])
+      ligada: formatarHoraExcel(ligada),
+      desligada: formatarHoraExcel(desligada),
+      paradas3min: formatarCelulaParada(linha[6]),
+      paradas10min: formatarCelulaParada(linha[7]),
+      paradas20min: formatarCelulaParada(linha[8]),
+      paradas30min: formatarCelulaParada(linha[9]),
+      motivo: String(linha[10] || linha[11] || "-"),
+      servico: String(linha[12] || "-"),
+      pecas: String(linha[13] || "-"),
+      custoMO: typeof linha[1] === 'number' ? linha[1] : 0,
+      custoPecas: typeof linha[14] === 'number' ? linha[14] : 0,
+      obs: String(linha[15] || "-")
     });
   }
 
