@@ -200,9 +200,15 @@
       
       window.onload = function() {
         const hoje = new Date().toISOString().split('T')[0];
+        console.log("Data de hoje (frontend):", hoje);
         document.getElementById('apt-data').value = hoje;
         document.getElementById('hist-ini').value = hoje;
         document.getElementById('hist-fim').value = hoje;
+        console.log("Campos de data inicializados:", {
+          aptData: document.getElementById('apt-data').value,
+          histIni: document.getElementById('hist-ini').value,
+          histFim: document.getElementById('hist-fim').value
+        });
         google.script.run.withSuccessHandler(preencherSelects).buscarListasDropdown();
       };
 
@@ -446,20 +452,31 @@
         const maquina = document.getElementById('apt-maquina').value;
         const div = document.getElementById('hist-tabela');
         div.innerHTML = "<i>Buscando...</i>";
-        
+
         let ini = null, fim = null;
         if (!tudo) {
            ini = document.getElementById('hist-ini').value;
            fim = document.getElementById('hist-fim').value;
         }
 
-        google.script.run.withSuccessHandler(lista => {
-          HistoricoAtual = lista; // Guarda para impressão
+        console.log("=== buscarHistorico FRONTEND ===");
+        console.log("Máquina:", maquina);
+        console.log("Período:", ini, "até", fim);
+        console.log("Tudo:", tudo);
 
-          if(!lista || lista.length === 0) {
-            div.innerHTML = "<p style='text-align:center; color:#999; padding:20px;'>Sem registros para o período selecionado.</p>";
-            return;
-          }
+        google.script.run
+          .withSuccessHandler(lista => {
+            console.log("Sucesso! Recebido:", lista ? lista.length : 0, "registros");
+            if (lista && lista.length > 0) {
+              console.log("Primeiro registro:", lista[0]);
+            }
+
+            HistoricoAtual = lista; // Guarda para impressão
+
+            if(!lista || lista.length === 0) {
+              div.innerHTML = "<p style='text-align:center; color:#999; padding:20px;'>Sem registros para o período selecionado.</p>";
+              return;
+            }
           let html = `<div class="table-wrapper"><table>
             <thead><tr>
               <th>Data</th>
@@ -500,7 +517,12 @@
             <b>${lista.length}</b> registro(s) encontrado(s)
           </div>`;
           div.innerHTML = html;
-        }).buscarHistorico(maquina, ini, fim);
+        })
+        .withFailureHandler(erro => {
+          console.error("ERRO ao buscar histórico:", erro);
+          div.innerHTML = "<p style='text-align:center; color:#dc3545; padding:20px;'>❌ Erro: " + erro.message + "</p>";
+        })
+        .buscarHistorico(maquina, ini, fim);
       }
 
       function imprimirRelatorio() {
