@@ -323,25 +323,33 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
     Logger.log("  ✓ Aceita");
 
     // Passou nos filtros - adicionar ao resultado
-    resultados.push({
-      turno: linha[2] || "-",
-      data: Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy"),
-      ligada: formatarHoraExcel(linha[4]),
-      desligada: formatarHoraExcel(linha[5]),
-      paradas3min: linha[6] || "-",
-      paradas10min: linha[7] || "-",
-      paradas20min: linha[8] || "-",
-      paradas30min: linha[9] || "-",
-      motivo: linha[10] || linha[11] || "-",
-      servico: linha[12] || "-",
-      pecas: linha[13] || "-",
-      custoMO: typeof linha[1] === 'number' ? linha[1] : 0,
-      custoPecas: typeof linha[14] === 'number' ? linha[14] : 0,
-      obs: linha[15] || "-"
-    });
+    try {
+      const registro = {
+        turno: String(linha[2] || "-"),
+        data: Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy"),
+        ligada: formatarHoraExcel(linha[4]),
+        desligada: formatarHoraExcel(linha[5]),
+        paradas3min: String(linha[6] || "-"),
+        paradas10min: String(linha[7] || "-"),
+        paradas20min: String(linha[8] || "-"),
+        paradas30min: String(linha[9] || "-"),
+        motivo: String(linha[10] || linha[11] || "-"),
+        servico: String(linha[12] || "-"),
+        pecas: String(linha[13] || "-"),
+        custoMO: typeof linha[1] === 'number' ? linha[1] : 0,
+        custoPecas: typeof linha[14] === 'number' ? linha[14] : 0,
+        obs: String(linha[15] || "-")
+      };
+
+      resultados.push(registro);
+      Logger.log("  → Registro adicionado: " + registro.data + " | " + registro.turno);
+    } catch (erro) {
+      Logger.log("  ⚠ ERRO ao processar linha " + i + ": " + erro.message);
+    }
   }
 
   Logger.log("Registros encontrados: " + resultados.length);
+  Logger.log("Retornando array com " + resultados.length + " elementos");
   return resultados;
 }
 
