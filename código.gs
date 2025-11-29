@@ -483,21 +483,38 @@ function gerarRelatorioTurnos() {
   }
   
   const dadosBrutos = sheetDados.getDataRange().getValues();
-  const resumo = {}; 
-  
+  const resumo = {};
+
+  Logger.log("=== PROCESSANDO PÁGINA1 ===");
+  Logger.log("Total de linhas: " + (dadosBrutos.length - 1));
+
+  let contadores = { total: 0, processadas: 0, ignoradas: 0, semTurno: 0 };
+
   for (let i = 1; i < dadosBrutos.length; i++) {
     let linha = dadosBrutos[i];
-    let dataOriginal = lerDataBR(linha[0]); 
+    let dataOriginal = lerDataBR(linha[0]);
     let hora = linha[1];
     let maquinaRaw = linha[2];
     let evento = linha[3];
-    let duracao = parseDuration(linha[4]); 
-    
-    if (!maquinaRaw || !hora) continue;
+    let duracaoRaw = linha[4];
+    let duracao = parseDuration(duracaoRaw);
+
+    contadores.total++;
+
+    if (!maquinaRaw || !hora) {
+      contadores.ignoradas++;
+      continue;
+    }
+
     let maquina = String(maquinaRaw).trim();
     let nomeEvento = evento ? String(evento).trim() : "";
-    if (nomeEvento !== "TEMPO PRODUZINDO" && nomeEvento !== "TEMPO PARADA") continue;
-    
+
+    if (nomeEvento !== "TEMPO PRODUZINDO" && nomeEvento !== "TEMPO PARADA") {
+      contadores.ignoradas++;
+      Logger.log(`Linha ${i+1}: Evento ignorado "${nomeEvento}"`);
+      continue;
+    }
+
     let infoTurno = descobrirTurnoCompleto(hora, maquina, configTurnos);
     if (infoTurno) {
       let dataFim = new Date(dataOriginal);
@@ -516,10 +533,31 @@ function gerarRelatorioTurnos() {
         dataProducao.setDate(dataProducao.getDate() - 1);
       }
 
+      // Log detalhado para eventos TEMPO PARADA
+      if (nomeEvento === "TEMPO PARADA" && duracao > 180) {
+        Logger.log(`Linha ${i+1}: ${maquina} | ${nomeEvento} | Raw: ${duracaoRaw} | Segundos: ${duracao} | Turno: ${infoTurno.nome}`);
+      }
+
       processarRegistro(resumo, ss, maquina, dataProducao, infoTurno.nome, nomeEvento, duracao);
+      contadores.processadas++;
+    } else {
+      contadores.semTurno++;
+      Logger.log(`Linha ${i+1}: Sem turno - ${maquina} às ${hora}`);
     }
   }
-  
+
+  Logger.log("=== RESUMO PROCESSAMENTO ===");
+  Logger.log(`Total: ${contadores.total} | Processadas: ${contadores.processadas} | Ignoradas: ${contadores.ignoradas} | Sem turno: ${contadores.semTurno}`);
+
+  // Log do resumo acumulado
+  Logger.log("=== RESUMO PARADAS ACUMULADAS ===");
+  for (let chave in resumo) {
+    let item = resumo[chave];
+    if (item.listaStop3 && item.listaStop3.length > 0) {
+      Logger.log(`${chave}: ${item.listaStop3.length} paradas >3min | ${item.listaStop10.length} >10min | ${item.listaStop20.length} >20min | ${item.listaStop30.length} >30min`);
+    }
+  }
+
   const linhasSaida = [];
   const SEGUNDOS_DIA = 86400;
   
@@ -736,15 +774,36 @@ function processarRegistro(resumo, ss, maquina, data, turno, evento, segundos) {
   let dStr = Utilities.formatDate(data, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy");
   let chave = maquina + "|" + dStr + "|" + turno;
   if (!resumo[chave]) resumo[chave] = { maquina: maquina, data: data, turno: turno, ligada: 0, desligada: 0, listaStop3: [], listaStop10: [], listaStop20: [], listaStop30: [] };
-  if (evento === "TEMPO PRODUZINDO") resumo[chave].ligada += segundos;
-  else {
+
+  if (evento === "TEMPO PRODUZINDO") {
+    resumo[chave].ligada += segundos;
+  } else {
     resumo[chave].desligada += segundos;
-    if (segundos > 10) { 
-        resumo[chave].qtdParadas++;
-        if (segundos > 180) resumo[chave].listaStop3.push(segundos);
-        if (segundos > 600) resumo[chave].listaStop10.push(segundos);
-        if (segundos > 1200) resumo[chave].listaStop20.push(segundos);
-        if (segundos > 1800) resumo[chave].listaStop30.push(segundos);
+    if (segundos > 10) {
+      if (!resumo[chave].qtdParadas) resumo[chave].qtdParadas = 0;
+      resumo[chave].qtdParadas++;
+
+      let adicionado = [];
+      if (segundos > 180) {
+        resumo[chave].listaStop3.push(segundos);
+        adicionado.push(">3min");
+      }
+      if (segundos > 600) {
+        resumo[chave].listaStop10.push(segundos);
+        adicionado.push(">10min");
+      }
+      if (segundos > 1200) {
+        resumo[chave].listaStop20.push(segundos);
+        adicionado.push(">20min");
+      }
+      if (segundos > 1800) {
+        resumo[chave].listaStop30.push(segundos);
+        adicionado.push(">30min");
+      }
+
+      if (adicionado.length > 0) {
+        Logger.log(`  → Parada ${segundos}s adicionada em: ${adicionado.join(", ")} | Total >3min: ${resumo[chave].listaStop3.length}`);
+      }
     }
   }
 }
