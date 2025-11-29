@@ -125,21 +125,11 @@
             <span class="stats-badge stats-running" id="stats-running">0 rodando</span>
             <span class="stats-badge stats-stopped" id="stats-stopped">0 paradas</span>
           </div>
-          <!-- Filtro de Relatório por Família -->
-          <div style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <label style="font-size:12px; font-weight:bold; color:#555;">📊 Relatório:</label>
-            <select id="filtro-familia" style="padding:6px 10px; border:1px solid #ddd; border-radius:5px; font-size:12px; min-width:150px;">
-              <option value="">Selecione família...</option>
-            </select>
-            <input type="date" id="relatorio-data-inicio" style="padding:6px 10px; border:1px solid #ddd; border-radius:5px; font-size:12px;">
-            <span style="color:#999;">até</span>
-            <input type="date" id="relatorio-data-fim" style="padding:6px 10px; border:1px solid #ddd; border-radius:5px; font-size:12px;">
-            <button onclick="gerarRelatorioFamilia()" style="padding:7px 15px; background:#007bff; color:white; border:none; border-radius:5px; font-size:12px; cursor:pointer; font-weight:bold;">
-              📋 Gerar Relatório
-            </button>
-          </div>
         </div>
         <div style="display:flex; gap:10px; align-items:center;">
+          <button onclick="abrirModalRelatorioFamilia()" style="padding:8px 15px; background:#007bff; color:white; border:none; border-radius:5px; font-size:13px; cursor:pointer; font-weight:bold;">
+            📋 Gerar Relatório por Família
+          </button>
           <input type="text" id="search-machine" placeholder="🔍 Buscar máquina..."
             style="padding:8px 12px; border:1px solid #ddd; border-radius:5px; font-size:13px; width:200px;"
             oninput="filtrarMaquinas(this.value)">
@@ -233,12 +223,43 @@
           <span id="relatorio-titulo">📊 Relatório por Família</span>
           <span class="close" onclick="fecharRelatorioFamilia()">&times;</span>
         </div>
-        <div id="relatorio-conteudo" style="padding:20px;">
-          <div style="text-align:center; padding:40px; color:#999;">
-            Selecione uma família e período para gerar o relatório
+
+        <!-- Filtros do Relatório -->
+        <div style="padding:20px; background:#f8f9fa; border-bottom:2px solid #ddd;">
+          <div style="display:flex; gap:15px; align-items:flex-end; flex-wrap:wrap;">
+            <div style="flex:1; min-width:200px;">
+              <label style="display:block; font-size:12px; font-weight:bold; color:#555; margin-bottom:5px;">Família de Máquinas:</label>
+              <select id="filtro-familia" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:5px; font-size:13px;">
+                <option value="">Selecione a família...</option>
+              </select>
+            </div>
+            <div style="flex:1; min-width:150px;">
+              <label style="display:block; font-size:12px; font-weight:bold; color:#555; margin-bottom:5px;">Data Início:</label>
+              <input type="date" id="relatorio-data-inicio" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:5px; font-size:13px;">
+            </div>
+            <div style="flex:1; min-width:150px;">
+              <label style="display:block; font-size:12px; font-weight:bold; color:#555; margin-bottom:5px;">Data Fim:</label>
+              <input type="date" id="relatorio-data-fim" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:5px; font-size:13px;">
+            </div>
+            <div>
+              <button onclick="gerarRelatorioFamilia()" style="padding:10px 20px; background:#007bff; color:white; border:none; border-radius:5px; font-size:13px; cursor:pointer; font-weight:bold;">
+                📋 Gerar Relatório
+              </button>
+            </div>
           </div>
         </div>
-        <div style="padding:0 20px 20px; text-align:right;">
+
+        <!-- Conteúdo do Relatório -->
+        <div id="relatorio-conteudo" style="padding:20px; min-height:300px;">
+          <div style="text-align:center; padding:60px; color:#999;">
+            <div style="font-size:16px; margin-bottom:10px;">📊</div>
+            <div>Selecione a família e o período acima</div>
+            <div style="font-size:12px; margin-top:5px; color:#aaa;">Clique em "Gerar Relatório" para visualizar os dados</div>
+          </div>
+        </div>
+
+        <!-- Botão Imprimir -->
+        <div id="relatorio-acoes" style="padding:0 20px 20px; text-align:right; display:none;">
           <button onclick="imprimirRelatorioFamilia()" style="padding:10px 20px; background:#28a745; color:white; border:none; border-radius:5px; font-size:13px; cursor:pointer; font-weight:bold;">
             🖨️ Imprimir Relatório
           </button>
@@ -249,6 +270,7 @@
     <script>
       let MaquinasData = {};
       let HistoricoAtual = []; // Guarda dados para impressão
+      let FamiliasDisponiveis = []; // Lista de famílias disponíveis
       
       window.onload = function() {
         const hoje = new Date().toISOString().split('T')[0];
@@ -320,17 +342,9 @@
 
         const familiasOrdenadas = Object.keys(grupos).sort();
 
-        // Popular dropdown de famílias
-        const selectFamilia = document.getElementById('filtro-familia');
-        const familiaAtual = selectFamilia.value;
-        selectFamilia.innerHTML = '<option value="">Selecione família...</option>';
-        familiasOrdenadas.forEach(fam => {
-          const option = document.createElement('option');
-          option.value = fam;
-          option.textContent = fam;
-          if (fam === familiaAtual) option.selected = true;
-          selectFamilia.appendChild(option);
-        });
+        // Armazenar famílias disponíveis para o relatório
+        FamiliasDisponiveis = familiasOrdenadas;
+
         if(familiasOrdenadas.length === 0) {
           container.innerHTML = "<p style='text-align:center'>Sem dados.</p>";
           return;
@@ -485,6 +499,38 @@
          document.getElementById('modal-paradas-criticas').style.display = 'none';
       }
 
+      function abrirModalRelatorioFamilia() {
+        // Abrir modal
+        document.getElementById('modal-relatorio-familia').style.display = 'flex';
+
+        // Popular dropdown de famílias
+        const selectFamilia = document.getElementById('filtro-familia');
+        selectFamilia.innerHTML = '<option value="">Selecione a família...</option>';
+        FamiliasDisponiveis.forEach(fam => {
+          const option = document.createElement('option');
+          option.value = fam;
+          option.textContent = fam;
+          selectFamilia.appendChild(option);
+        });
+
+        // Resetar conteúdo
+        document.getElementById('relatorio-conteudo').innerHTML = `
+          <div style="text-align:center; padding:60px; color:#999;">
+            <div style="font-size:16px; margin-bottom:10px;">📊</div>
+            <div>Selecione a família e o período acima</div>
+            <div style="font-size:12px; margin-top:5px; color:#aaa;">Clique em "Gerar Relatório" para visualizar os dados</div>
+          </div>
+        `;
+
+        // Esconder botão de imprimir
+        document.getElementById('relatorio-acoes').style.display = 'none';
+
+        // Inicializar datas com hoje
+        const hoje = new Date().toISOString().split('T')[0];
+        document.getElementById('relatorio-data-inicio').value = hoje;
+        document.getElementById('relatorio-data-fim').value = hoje;
+      }
+
       function gerarRelatorioFamilia() {
         const familia = document.getElementById('filtro-familia').value;
         const dataInicio = document.getElementById('relatorio-data-inicio').value;
@@ -499,16 +545,17 @@
           return;
         }
 
-        // Abrir modal e mostrar loading
-        document.getElementById('modal-relatorio-familia').style.display = 'flex';
+        // Mostrar loading
         document.getElementById('relatorio-titulo').textContent = `📊 Relatório: ${familia}`;
         document.getElementById('relatorio-conteudo').innerHTML = '<div style="text-align:center; padding:60px;"><div style="font-size:18px; color:#666;">⏳ Gerando relatório...</div><div style="font-size:13px; color:#999; margin-top:10px;">Processando dados da família ' + familia + '</div></div>';
+        document.getElementById('relatorio-acoes').style.display = 'none';
 
         // Chamar backend
         google.script.run
           .withSuccessHandler(renderizarRelatorioFamilia)
           .withFailureHandler(erro => {
             document.getElementById('relatorio-conteudo').innerHTML = '<div style="text-align:center; padding:40px; color:#dc3545;">❌ Erro ao gerar relatório: ' + erro + '</div>';
+            document.getElementById('relatorio-acoes').style.display = 'none';
           })
           .buscarRelatorioFamilia(familia, dataInicio, dataFim);
       }
@@ -516,6 +563,7 @@
       function renderizarRelatorioFamilia(dados) {
         if (!dados || !dados.maquinas || dados.maquinas.length === 0) {
           document.getElementById('relatorio-conteudo').innerHTML = '<div style="text-align:center; padding:40px; color:#999;">📭 Nenhum dado encontrado para esta família no período selecionado</div>';
+          document.getElementById('relatorio-acoes').style.display = 'none';
           return;
         }
 
@@ -574,6 +622,9 @@
         });
 
         document.getElementById('relatorio-conteudo').innerHTML = html;
+
+        // Mostrar botão de imprimir
+        document.getElementById('relatorio-acoes').style.display = 'block';
       }
 
       function fecharRelatorioFamilia() {
