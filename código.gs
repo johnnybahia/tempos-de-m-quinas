@@ -662,6 +662,14 @@ function descobrirTurnoCompleto(hora, maq, config) {
   return null;
 }
 function formatarHoraExcel(val) {
+  // Se é um Date object (Google Sheets armazena horários como Date)
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    const h = val.getHours();
+    const m = val.getMinutes();
+    const s = val.getSeconds();
+    return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+  }
+
   // Se já é uma string formatada (ex: "1:30:14"), retorna direto
   if (typeof val === 'string' && val.includes(':')) {
     return val;
