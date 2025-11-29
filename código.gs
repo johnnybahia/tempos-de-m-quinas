@@ -671,7 +671,23 @@ function lerDataBR(valor) {
 function parseDuration(raw) {
   if (typeof raw === 'number') return raw;
   if (raw instanceof Date) return raw.getHours() * 3600 + raw.getMinutes() * 60 + raw.getSeconds();
-  if (typeof raw === 'string') { let s = parseFloat(raw.replace(',', '.').trim()); return isNaN(s) ? 0 : s; }
+  if (typeof raw === 'string') {
+    let str = raw.trim();
+    // Se está no formato HH:MM:SS ou MM:SS
+    if (str.includes(':')) {
+      let partes = str.split(':');
+      if (partes.length === 3) {
+        // HH:MM:SS
+        return parseInt(partes[0]) * 3600 + parseInt(partes[1]) * 60 + parseInt(partes[2]);
+      } else if (partes.length === 2) {
+        // MM:SS
+        return parseInt(partes[0]) * 60 + parseInt(partes[1]);
+      }
+    }
+    // Se é um número puro como string
+    let s = parseFloat(str.replace(',', '.'));
+    return isNaN(s) ? 0 : s;
+  }
   return 0;
 }
 function horaParaMinutos(val) {
