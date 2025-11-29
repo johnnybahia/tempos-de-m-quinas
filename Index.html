@@ -483,10 +483,7 @@
               <th>Turno</th>
               <th style="background:#e8f5e9;">Tempo Ligada</th>
               <th style="background:#ffebee;">Tempo Parada</th>
-              <th>>3min</th>
-              <th>>10min</th>
-              <th>>20min</th>
-              <th style="background:#fff3e0;">>30min</th>
+              <th style="background:#fff3e0;">Paradas > 3min</th>
               <th>Custo MO</th>
               <th>Motivo</th>
               <th>Serviço</th>
@@ -500,10 +497,7 @@
               <td style="text-align:center;"><span style="background:#e3f2fd; padding:4px 8px; border-radius:3px; font-weight:bold; font-size:11px;">${r.turno}</span></td>
               <td style="color:#2e7d32; font-weight:bold; background:#f1f8f4;">${r.ligada}</td>
               <td style="color:#c62828; font-weight:bold; background:#fef5f5;">${r.desligada}</td>
-              <td style="font-size:10px; color:#666;">${r.paradas3min}</td>
-              <td style="font-size:10px; color:#666;">${r.paradas10min}</td>
-              <td style="font-size:10px; color:#666;">${r.paradas20min}</td>
-              <td style="font-size:10px; color:#e65100; font-weight:bold; background:#fff8f0;">${r.paradas30min}</td>
+              <td style="font-size:10px; color:#e65100; font-weight:bold; background:#fff8f0;">${r.paradas3min}</td>
               <td style="font-weight:bold;">${typeof r.custoMO === 'number' ? 'R$ '+r.custoMO.toFixed(2) : r.custoMO}</td>
               <td style="font-size:11px;">${r.motivo}</td>
               <td style="font-size:11px;">${r.servico || '-'}</td>
