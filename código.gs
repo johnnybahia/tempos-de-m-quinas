@@ -268,6 +268,24 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
     return { erro: "Aba 'Pagina' não encontrada" };
   }
 
+  // Carregar mapeamento de máquinas -> famílias da aba DADOS
+  const sheetDadosConfig = ss.getSheetByName("DADOS");
+  const mapaFamilias = {};
+  if (sheetDadosConfig) {
+    const dConfig = sheetDadosConfig.getDataRange().getValues();
+    if (dConfig.length > 0) {
+      const h = dConfig[0].map(c => String(c).toUpperCase().trim());
+      const idxM = h.indexOf("MÁQUINAS");
+      const idxF = h.findIndex(x => x.includes("FAMÍLIA") || x.includes("FAMILIA"));
+      if (idxM > -1 && idxF > -1) {
+        for (let i = 1; i < dConfig.length; i++) {
+          let m = String(dConfig[i][idxM]).trim();
+          mapaFamilias[m] = String(dConfig[i][idxF] || "GERAL").trim();
+        }
+      }
+    }
+  }
+
   const dados = sheet.getDataRange().getValues();
   const timezone = ss.getSpreadsheetTimeZone();
 
@@ -275,6 +293,7 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
   Logger.log("Família: " + familia);
   Logger.log("Período: " + dataInicio + " até " + dataFim);
   Logger.log("Total linhas: " + dados.length);
+  Logger.log("Total máquinas no mapa: " + Object.keys(mapaFamilias).length);
 
   // Estrutura da aba "Pagina" (16 colunas):
   // Col 0: MÁQUINAS | Col 1: CUSTO MO | Col 2: TURNO | Col 3: DATA
@@ -294,8 +313,9 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
     const linha = dados[i];
     const nomeMaquina = String(linha[0]).trim();
 
-    // Verificar se pertence à família (por substring no nome)
-    if (!nomeMaquina.toUpperCase().includes(familia.toUpperCase())) {
+    // Verificar se pertence à família usando o mapeamento da aba DADOS
+    const familiaMaquina = mapaFamilias[nomeMaquina] || "";
+    if (familiaMaquina.toUpperCase() !== familia.toUpperCase()) {
       continue;
     }
 
@@ -303,7 +323,7 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
     const dataLinha = lerDataBR(linha[3]); // Col 3: DATA
     const dataLinhaStr = Utilities.formatDate(dataLinha, timezone, "yyyy-MM-dd");
 
-    Logger.log(`Linha ${i}: ${nomeMaquina} | ${turno} | ${dataLinhaStr}`);
+    Logger.log(`Linha ${i}: ${nomeMaquina} (fam: ${familiaMaquina}) | ${turno} | ${dataLinhaStr}`);
 
     // Filtrar por data
     if (dataInicio && dataLinhaStr < dataInicio) {
@@ -386,6 +406,14 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
 
   Logger.log("Total máquinas encontradas: " + maquinas.length);
   Logger.log("Total paradas críticas: " + totalParadasCriticas);
+
+  // Debug: mostrar famílias disponíveis se não encontrou nada
+  if (maquinas.length === 0) {
+    const familiasUnicas = [...new Set(Object.values(mapaFamilias))];
+    Logger.log("⚠️ NENHUMA MÁQUINA ENCONTRADA!");
+    Logger.log("Famílias disponíveis no mapa: " + familiasUnicas.join(", "));
+    Logger.log("Família buscada: '" + familia + "'");
+  }
 
   return {
     familia: familia,
