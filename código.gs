@@ -652,11 +652,20 @@ function descobrirTurnoCompleto(hora, maq, config) {
   return null;
 }
 function formatarHoraExcel(val) {
-  // Sempre retorna string no formato HH:MM:SS
-  if (typeof val !== 'number' || val < 0 || isNaN(val)) return "00:00:00";
-  let s = Math.round(val * 86400);
-  let h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
-  return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
+  // Se já é uma string formatada (ex: "1:30:14"), retorna direto
+  if (typeof val === 'string' && val.includes(':')) {
+    return val;
+  }
+
+  // Se é um número (fração de dia), converte para HH:MM:SS
+  if (typeof val === 'number' && val >= 0 && !isNaN(val)) {
+    let s = Math.round(val * 86400);
+    let h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+    return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
+  }
+
+  // Caso padrão
+  return "00:00:00";
 }
 function processarRegistro(resumo, ss, maquina, data, turno, evento, segundos) {
   if (segundos > 86400) return;
