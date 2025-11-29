@@ -26,6 +26,10 @@ function salvarDadosESP32(e) {
   var horaStr = Utilities.formatDate(dataAtual, timezone, "HH:mm:ss");
   
   sheet.appendRow([dataStr, horaStr, maquina, evento, duracao]);
+
+  // Atualizar PAINEL automaticamente após receber dados do ESP32
+  gerarRelatorioTurnos();
+
   return ContentService.createTextOutput("OK");
 }
 
