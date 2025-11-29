@@ -184,11 +184,13 @@ function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
   Logger.log("Turno: " + turnoNome);
   Logger.log("Data: " + dataBuscaStr);
 
-  // Estrutura da aba "Pagina":
-  // Col 0: MÁQUINAS
-  // Col 2: TURNO
-  // Col 3: DATA
-  // Col 6: TEMPOS > 30 min (paradas)
+  // Estrutura da aba "Pagina" (16 colunas):
+  // Col 0: MÁQUINAS | Col 1: CUSTO MO | Col 2: TURNO | Col 3: DATA
+  // Col 4: LIGADA | Col 5: DESLIGADA
+  // Col 6: TEMPOS > 3 min | Col 7: TEMPOS > 10 min
+  // Col 8: TEMPOS > 20 min | Col 9: TEMPOS > 30 min
+  // Col 10: MOTIVO | Col 11: MOTIVO(dup) | Col 12: SERVIÇOS
+  // Col 13: PEÇAS | Col 14: CUSTO PEÇAS | Col 15: DATA FAB
 
   // Procurar a linha que corresponde
   for (let i = 1; i < dados.length; i++) {
@@ -202,45 +204,57 @@ function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
     if (maqLinha === maquina && turnoLinha === turnoNome && dataLinhaStr === dataBuscaStr) {
       Logger.log("✓ Linha encontrada: " + (i + 1));
 
-      // Coluna 6: TEMPOS > 30 min (ex: "00:30:27, 00:39:55")
-      const temposStr = String(linha[6] || "").trim();
-      Logger.log("Tempos > 30 min: " + temposStr);
-
       const paradas = [];
 
-      if (temposStr && temposStr !== "-" && temposStr !== "") {
-        // Separar por vírgula
-        const tempos = temposStr.split(",");
+      // Processar TODAS as 4 colunas de tempo
+      const categorias = [
+        { coluna: 6, nome: "> 3 min" },
+        { coluna: 7, nome: "> 10 min" },
+        { coluna: 8, nome: "> 20 min" },
+        { coluna: 9, nome: "> 30 min" }
+      ];
 
-        tempos.forEach((tempo, idx) => {
-          tempo = tempo.trim();
-          if (tempo && tempo.includes(":")) {
-            // Parsear HH:MM:SS
-            const partes = tempo.split(":");
-            const h = parseInt(partes[0]) || 0;
-            const m = parseInt(partes[1]) || 0;
-            const s = partes.length > 2 ? (parseInt(partes[2]) || 0) : 0;
-            const duracaoSeg = h * 3600 + m * 60 + s;
+      categorias.forEach(cat => {
+        const temposStr = String(linha[cat.coluna] || "").trim();
 
-            if (duracaoSeg > 0) {
-              paradas.push({
-                categoria: "> 30 min",
-                duracao: duracaoSeg,
-                duracaoFmt: tempo,
-                horario: "-"
-              });
-              Logger.log("  ✓ Parada #" + (idx + 1) + ": " + tempo);
+        if (temposStr && temposStr !== "-" && temposStr !== "") {
+          Logger.log(cat.nome + ": " + temposStr);
+
+          // Separar por vírgula
+          const tempos = temposStr.split(",");
+
+          tempos.forEach(tempo => {
+            tempo = tempo.trim();
+            if (tempo && tempo.includes(":")) {
+              // Parsear HH:MM:SS ou HH:MM
+              const partes = tempo.split(":");
+              const h = parseInt(partes[0]) || 0;
+              const m = parseInt(partes[1]) || 0;
+              const s = partes.length > 2 ? (parseInt(partes[2]) || 0) : 0;
+              const duracaoSeg = h * 3600 + m * 60 + s;
+
+              if (duracaoSeg > 0) {
+                // Formato 00:00 (sem segundos)
+                const tempoFormatado = String(h).padStart(2, '0') + ":" + String(m).padStart(2, '0');
+
+                paradas.push({
+                  categoria: cat.nome,
+                  duracao: duracaoSeg,
+                  duracaoFmt: tempoFormatado,
+                  horario: "-"
+                });
+              }
             }
-          }
-        });
-      }
+          });
+        }
+      });
 
       Logger.log("Total paradas: " + paradas.length);
       return paradas;
     }
   }
 
-  Logger.log("⚠ Nenhuma linha encontrada");
+  Logger.log("⚠ Nenhuma linha encontrada para: " + maquina + " | " + turnoNome + " | " + dataBuscaStr);
   return [];
 }
 
@@ -275,11 +289,13 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
 
   Logger.log("Total linhas: " + dados.length);
 
-  // Estrutura da aba "Pagina":
+  // Estrutura da aba "Pagina" (16 colunas):
   // Col 0: MÁQUINAS | Col 1: CUSTO MO | Col 2: TURNO | Col 3: DATA
-  // Col 4: LIGADA | Col 5: DESLIGADA | Col 6: TEMPOS > 30 min
-  // Col 7: MOTIVO | Col 8: MOTIVO(dup) | Col 9: SERVIÇOS
-  // Col 10: PEÇAS | Col 11: CUSTO PEÇAS | Col 12: DATA FAB
+  // Col 4: LIGADA | Col 5: DESLIGADA
+  // Col 6: TEMPOS > 3 min | Col 7: TEMPOS > 10 min
+  // Col 8: TEMPOS > 20 min | Col 9: TEMPOS > 30 min
+  // Col 10: MOTIVO | Col 11: MOTIVO(dup) | Col 12: SERVIÇOS
+  // Col 13: PEÇAS | Col 14: CUSTO PEÇAS | Col 15: DATA FAB
 
   // Percorrer todas as linhas
   for (let i = 1; i < dados.length; i++) {
@@ -293,8 +309,18 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
     let dataLinha = lerDataBR(linha[3]);
     let dataLinhaStr = Utilities.formatDate(dataLinha, timezone, "yyyy-MM-dd");
 
-    if (dataInicio && dataLinhaStr < dataInicio) continue;
-    if (dataFim && dataLinhaStr > dataFim) continue;
+    Logger.log("Linha " + i + " - Máq: " + maqLinha + " | Data: " + dataLinhaStr + " | Filtro: " + dataInicio + " a " + dataFim);
+
+    if (dataInicio && dataLinhaStr < dataInicio) {
+      Logger.log("  ⊗ Rejeitada (antes do início)");
+      continue;
+    }
+    if (dataFim && dataLinhaStr > dataFim) {
+      Logger.log("  ⊗ Rejeitada (depois do fim)");
+      continue;
+    }
+
+    Logger.log("  ✓ Aceita");
 
     // Passou nos filtros - adicionar ao resultado
     resultados.push({
@@ -302,13 +328,16 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
       data: Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy"),
       ligada: formatarHoraExcel(linha[4]),
       desligada: formatarHoraExcel(linha[5]),
-      paradas30min: linha[6] || "-",
-      motivo: linha[7] || linha[8] || "-",
-      servico: linha[9] || "-",
-      pecas: linha[10] || "-",
+      paradas3min: linha[6] || "-",
+      paradas10min: linha[7] || "-",
+      paradas20min: linha[8] || "-",
+      paradas30min: linha[9] || "-",
+      motivo: linha[10] || linha[11] || "-",
+      servico: linha[12] || "-",
+      pecas: linha[13] || "-",
       custoMO: typeof linha[1] === 'number' ? linha[1] : 0,
-      custoPecas: typeof linha[11] === 'number' ? linha[11] : 0,
-      obs: linha[12] || "-"
+      custoPecas: typeof linha[14] === 'number' ? linha[14] : 0,
+      obs: linha[15] || "-"
     });
   }
 
