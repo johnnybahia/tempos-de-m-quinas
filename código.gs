@@ -180,10 +180,10 @@ function buscarDadosTempoReal() {
 // SIMPLIFICADO: Busca diretamente na aba "Pagina"
 function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
+  const sheet = ss.getSheetByName("PAINEL");
 
   if (!sheet) {
-    Logger.log("ERRO: Aba 'Pagina' não encontrada");
+    Logger.log("ERRO: Aba 'PAINEL' não encontrada");
     return [];
   }
 
@@ -199,20 +199,19 @@ function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
   Logger.log("Turno: " + turnoNome);
   Logger.log("Data: " + dataBuscaStr);
 
-  // Estrutura da aba "Pagina" (16 colunas):
-  // Col 0: MÁQUINAS | Col 1: CUSTO MO | Col 2: TURNO | Col 3: DATA
-  // Col 4: LIGADA | Col 5: DESLIGADA
-  // Col 6: TEMPOS > 3 min | Col 7: TEMPOS > 10 min
-  // Col 8: TEMPOS > 20 min | Col 9: TEMPOS > 30 min
-  // Col 10: MOTIVO | Col 11: MOTIVO(dup) | Col 12: SERVIÇOS
-  // Col 13: PEÇAS | Col 14: CUSTO PEÇAS | Col 15: DATA FAB
+  // Estrutura da aba "PAINEL":
+  // Col 0: MÁQUINAS | Col 1: TURNO | Col 2: DATA
+  // Col 3: LIGADA | Col 4: DESLIGADA
+  // Col 5: TEMPOS > 3 min ← APENAS ESTA COLUNA
+  // Col 6: TEMPOS > 10 min | Col 7: TEMPOS > 20 min | Col 8: TEMPOS > 30 min
+  // Col 9: CUSTO MÃO DE OBRA | Col 10: MOTIVO DA PARADA | ...
 
   // Procurar a linha que corresponde
   for (let i = 1; i < dados.length; i++) {
     let linha = dados[i];
     let maqLinha = String(linha[0]).trim();
-    let turnoLinha = String(linha[2]).trim();
-    let dataLinha = lerDataBR(linha[3]);
+    let turnoLinha = String(linha[1]).trim();
+    let dataLinha = lerDataBR(linha[2]);
     let dataLinhaStr = Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy");
 
     // Verificar se é a linha correta (máquina + turno + data)
@@ -221,50 +220,36 @@ function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
 
       const paradas = [];
 
-      // Processar TODAS as 4 colunas de tempo
-      const categorias = [
-        { coluna: 6, nome: "> 3 min" },
-        { coluna: 7, nome: "> 10 min" },
-        { coluna: 8, nome: "> 20 min" },
-        { coluna: 9, nome: "> 30 min" }
-      ];
+      // Processar APENAS a coluna "> 3 min" (col 5)
+      const temposStr = String(linha[5] || "").trim();
 
-      categorias.forEach(cat => {
-        const temposStr = String(linha[cat.coluna] || "").trim();
+      if (temposStr && temposStr !== "-" && temposStr !== "") {
+        Logger.log("> 3 min: " + temposStr);
 
-        if (temposStr && temposStr !== "-" && temposStr !== "") {
-          Logger.log(cat.nome + ": " + temposStr);
+        // Separar por vírgula
+        const tempos = temposStr.split(",");
 
-          // Separar por vírgula
-          const tempos = temposStr.split(",");
+        tempos.forEach(tempo => {
+          tempo = tempo.trim();
+          if (tempo && tempo.includes(":")) {
+            // Parsear HH:MM:SS ou HH:MM
+            const partes = tempo.split(":");
+            const h = parseInt(partes[0]) || 0;
+            const m = parseInt(partes[1]) || 0;
+            const s = partes.length > 2 ? (parseInt(partes[2]) || 0) : 0;
+            const duracaoSeg = h * 3600 + m * 60 + s;
 
-          tempos.forEach(tempo => {
-            tempo = tempo.trim();
-            if (tempo && tempo.includes(":")) {
-              // Parsear HH:MM:SS ou HH:MM
-              const partes = tempo.split(":");
-              const h = parseInt(partes[0]) || 0;
-              const m = parseInt(partes[1]) || 0;
-              const s = partes.length > 2 ? (parseInt(partes[2]) || 0) : 0;
-              const duracaoSeg = h * 3600 + m * 60 + s;
-
-              if (duracaoSeg > 0) {
-                // Formato 00:00 (sem segundos)
-                const tempoFormatado = String(h).padStart(2, '0') + ":" + String(m).padStart(2, '0');
-
-                paradas.push({
-                  categoria: cat.nome,
-                  duracao: duracaoSeg,
-                  duracaoFmt: tempoFormatado,
-                  horario: "-"
-                });
-              }
+            if (duracaoSeg > 0) {
+              paradas.push({
+                duracao: duracaoSeg,
+                duracaoFmt: tempo
+              });
             }
-          });
-        }
-      });
+          }
+        });
+      }
 
-      Logger.log("Total paradas: " + paradas.length);
+      Logger.log("Total paradas > 3min: " + paradas.length);
       return paradas;
     }
   }
@@ -498,21 +483,38 @@ function gerarRelatorioTurnos() {
   }
   
   const dadosBrutos = sheetDados.getDataRange().getValues();
-  const resumo = {}; 
-  
+  const resumo = {};
+
+  Logger.log("=== PROCESSANDO PÁGINA1 ===");
+  Logger.log("Total de linhas: " + (dadosBrutos.length - 1));
+
+  let contadores = { total: 0, processadas: 0, ignoradas: 0, semTurno: 0 };
+
   for (let i = 1; i < dadosBrutos.length; i++) {
     let linha = dadosBrutos[i];
-    let dataOriginal = lerDataBR(linha[0]); 
+    let dataOriginal = lerDataBR(linha[0]);
     let hora = linha[1];
     let maquinaRaw = linha[2];
     let evento = linha[3];
-    let duracao = parseDuration(linha[4]); 
-    
-    if (!maquinaRaw || !hora) continue;
+    let duracaoRaw = linha[4];
+    let duracao = parseDuration(duracaoRaw);
+
+    contadores.total++;
+
+    if (!maquinaRaw || !hora) {
+      contadores.ignoradas++;
+      continue;
+    }
+
     let maquina = String(maquinaRaw).trim();
     let nomeEvento = evento ? String(evento).trim() : "";
-    if (nomeEvento !== "TEMPO PRODUZINDO" && nomeEvento !== "TEMPO PARADA") continue;
-    
+
+    if (nomeEvento !== "TEMPO PRODUZINDO" && nomeEvento !== "TEMPO PARADA") {
+      contadores.ignoradas++;
+      Logger.log(`Linha ${i+1}: Evento ignorado "${nomeEvento}"`);
+      continue;
+    }
+
     let infoTurno = descobrirTurnoCompleto(hora, maquina, configTurnos);
     if (infoTurno) {
       let dataFim = new Date(dataOriginal);
@@ -531,10 +533,31 @@ function gerarRelatorioTurnos() {
         dataProducao.setDate(dataProducao.getDate() - 1);
       }
 
+      // Log detalhado para eventos TEMPO PARADA
+      if (nomeEvento === "TEMPO PARADA" && duracao > 180) {
+        Logger.log(`Linha ${i+1}: ${maquina} | ${nomeEvento} | Raw: ${duracaoRaw} | Segundos: ${duracao} | Turno: ${infoTurno.nome}`);
+      }
+
       processarRegistro(resumo, ss, maquina, dataProducao, infoTurno.nome, nomeEvento, duracao);
+      contadores.processadas++;
+    } else {
+      contadores.semTurno++;
+      Logger.log(`Linha ${i+1}: Sem turno - ${maquina} às ${hora}`);
     }
   }
-  
+
+  Logger.log("=== RESUMO PROCESSAMENTO ===");
+  Logger.log(`Total: ${contadores.total} | Processadas: ${contadores.processadas} | Ignoradas: ${contadores.ignoradas} | Sem turno: ${contadores.semTurno}`);
+
+  // Log do resumo acumulado
+  Logger.log("=== RESUMO PARADAS ACUMULADAS ===");
+  for (let chave in resumo) {
+    let item = resumo[chave];
+    if (item.listaStop3 && item.listaStop3.length > 0) {
+      Logger.log(`${chave}: ${item.listaStop3.length} paradas >3min | ${item.listaStop10.length} >10min | ${item.listaStop20.length} >20min | ${item.listaStop30.length} >30min`);
+    }
+  }
+
   const linhasSaida = [];
   const SEGUNDOS_DIA = 86400;
   
@@ -751,15 +774,36 @@ function processarRegistro(resumo, ss, maquina, data, turno, evento, segundos) {
   let dStr = Utilities.formatDate(data, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy");
   let chave = maquina + "|" + dStr + "|" + turno;
   if (!resumo[chave]) resumo[chave] = { maquina: maquina, data: data, turno: turno, ligada: 0, desligada: 0, listaStop3: [], listaStop10: [], listaStop20: [], listaStop30: [] };
-  if (evento === "TEMPO PRODUZINDO") resumo[chave].ligada += segundos;
-  else {
+
+  if (evento === "TEMPO PRODUZINDO") {
+    resumo[chave].ligada += segundos;
+  } else {
     resumo[chave].desligada += segundos;
-    if (segundos > 10) { 
-        resumo[chave].qtdParadas++;
-        if (segundos > 180) resumo[chave].listaStop3.push(segundos);
-        if (segundos > 600) resumo[chave].listaStop10.push(segundos);
-        if (segundos > 1200) resumo[chave].listaStop20.push(segundos);
-        if (segundos > 1800) resumo[chave].listaStop30.push(segundos);
+    if (segundos > 10) {
+      if (!resumo[chave].qtdParadas) resumo[chave].qtdParadas = 0;
+      resumo[chave].qtdParadas++;
+
+      let adicionado = [];
+      if (segundos > 180) {
+        resumo[chave].listaStop3.push(segundos);
+        adicionado.push(">3min");
+      }
+      if (segundos > 600) {
+        resumo[chave].listaStop10.push(segundos);
+        adicionado.push(">10min");
+      }
+      if (segundos > 1200) {
+        resumo[chave].listaStop20.push(segundos);
+        adicionado.push(">20min");
+      }
+      if (segundos > 1800) {
+        resumo[chave].listaStop30.push(segundos);
+        adicionado.push(">30min");
+      }
+
+      if (adicionado.length > 0) {
+        Logger.log(`  → Parada ${segundos}s adicionada em: ${adicionado.join(", ")} | Total >3min: ${resumo[chave].listaStop3.length}`);
+      }
     }
   }
 }
