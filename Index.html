@@ -194,6 +194,25 @@
       </div>
     </div>
 
+    <!-- Modal Paradas Críticas -->
+    <div id="modal-paradas-criticas" class="modal">
+      <div class="modal-content" style="max-width:500px;">
+        <div class="modal-header">
+          <span id="modal-paradas-titulo">🔴 Paradas Críticas</span>
+          <span class="close" onclick="fecharModalParadas()">&times;</span>
+        </div>
+        <div style="padding:20px;">
+          <div id="paradas-criticas-info" style="margin-bottom:15px; padding:10px; background:#f8f9fa; border-radius:5px; font-size:12px;">
+            <strong id="paradas-maquina-nome"></strong><br>
+            <span id="paradas-turno-info" style="color:#666;"></span>
+          </div>
+          <div id="paradas-criticas-conteudo" style="text-align:center; padding:20px; color:#999;">
+            Carregando...
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script>
       let MaquinasData = {};
       let HistoricoAtual = []; // Guarda dados para impressão
@@ -329,18 +348,12 @@
                   <div class="daily-row"><span class="daily-val-prod">Produzindo: ${prodDia}</span></div>
                   <div class="daily-row"><span class="daily-val-stop">Parado: ${stopDia}</span></div>
                 </div>
-                <button class="btn-stops" data-safename="${safeName}">⏱️ Ver Paradas</button>
-                <div id="stops-${safeName}" class="stops-list"></div>
+                <button class="btn-stops" onclick="abrirModalParadas('${maq.nome}', '${maq.turnoAtual}')">🔴 Verificar Paradas Críticas</button>
                 <div class="card-turno">${maq.turnoAtual}</div>
                 <div class="card-footer-hint">👆 Toque para detalhes</div>
               `;
 
               // Adicionar event listeners após inserir HTML
-              const btnStops = card.querySelector('.btn-stops');
-              btnStops.addEventListener('click', function() {
-                toggleStops(this.getAttribute('data-safename'), card.getAttribute('data-maquina'));
-              });
-
               const titleEl = card.querySelector('.card-title');
               titleEl.addEventListener('click', function() {
                 abrirModal(card.getAttribute('data-maquina'), card.getAttribute('data-turno'));
@@ -363,50 +376,68 @@
         container.appendChild(fragment);
       }
 
-      function toggleStops(safeName, maquina) {
-         const el = document.getElementById('stops-' + safeName);
-         if (el.style.display === 'block') {
-           el.style.display = 'none';
+      function abrirModalParadas(maquina, turno) {
+         const maqData = MaquinasData[maquina];
+         if (!maqData) {
+           alert('Dados da máquina não encontrados');
            return;
          }
 
-         // Buscar paradas detalhadas
-         const maqData = MaquinasData[maquina];
-         if (!maqData) return;
+         // Atualizar informações do modal
+         document.getElementById('paradas-maquina-nome').textContent = maquina;
+         document.getElementById('paradas-turno-info').textContent = `${turno} - ${new Date().toLocaleDateString('pt-BR')}`;
+         document.getElementById('paradas-criticas-conteudo').innerHTML = '<div style="padding:20px;"><i>⏳ Carregando paradas críticas...</i></div>';
 
-         el.innerHTML = '<div style="text-align:center; padding:10px;"><i>Carregando paradas...</i></div>';
-         el.style.display = 'block';
+         // Abrir modal
+         document.getElementById('modal-paradas-criticas').style.display = 'flex';
 
-         // Calcular data de produção
+         // Buscar paradas do turno atual
          const agora = new Date();
          let dataProducao = agora.getTime();
 
          google.script.run.withSuccessHandler(paradas => {
            if (!paradas || paradas.length === 0) {
-             el.innerHTML = '<div style="text-align:center; padding:5px; color:#999;">Nenhuma parada > 3min registrada neste turno</div>';
+             document.getElementById('paradas-criticas-conteudo').innerHTML =
+               '<div style="text-align:center; padding:30px; color:#999;">✓ Nenhuma parada crítica (>3min) registrada neste turno</div>';
              return;
            }
 
-           let html = '<div style="max-height:200px; overflow-y:auto;">';
-           html += '<div style="background:#f8f9fa; padding:6px; font-size:11px; font-weight:bold; text-align:center; border:1px solid #ddd; margin-bottom:4px;">Paradas > 3 minutos</div>';
-           html += '<div style="display:flex; flex-wrap:wrap; gap:6px; padding:4px;">';
+           let html = '<div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center;">';
 
            paradas.forEach(p => {
              let corDuracao = '#666';
-             if (p.duracao > 1800) corDuracao = '#dc3545'; // >30min vermelho
-             else if (p.duracao > 1200) corDuracao = '#ff6b00'; // >20min laranja escuro
-             else if (p.duracao > 600) corDuracao = '#ff8c00'; // >10min laranja
-             else if (p.duracao > 180) corDuracao = '#ffa500'; // >3min amarelo
+             let icone = '⚠️';
+             if (p.duracao > 1800) {
+               corDuracao = '#dc3545'; // >30min vermelho
+               icone = '🔴';
+             } else if (p.duracao > 1200) {
+               corDuracao = '#ff6b00'; // >20min laranja escuro
+               icone = '🟠';
+             } else if (p.duracao > 600) {
+               corDuracao = '#ff8c00'; // >10min laranja
+               icone = '🟡';
+             } else if (p.duracao > 180) {
+               corDuracao = '#ffa500'; // >3min amarelo
+               icone = '⚠️';
+             }
 
-             html += `<div style="background:white; border:1px solid #ddd; border-radius:4px; padding:6px 10px; min-width:70px; text-align:center;">
-               <div style="color:${corDuracao}; font-weight:bold; font-size:13px;">${p.duracaoFmt}</div>
+             html += `<div style="background:white; border:2px solid ${corDuracao}; border-radius:8px; padding:12px 16px; min-width:90px; text-align:center; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+               <div style="font-size:20px; margin-bottom:4px;">${icone}</div>
+               <div style="color:${corDuracao}; font-weight:bold; font-size:16px;">${p.duracaoFmt}</div>
              </div>`;
            });
 
-           html += '</div></div>';
-           html += `<div style="text-align:center; margin-top:5px; font-size:9px; color:#999;">Total: ${paradas.length} parada(s)</div>`;
-           el.innerHTML = html;
-         }).buscarParadasTurnoAtual(maquina, maqData.turnoAtual, dataProducao);
+           html += '</div>';
+           html += `<div style="text-align:center; margin-top:20px; padding:10px; background:#fff3cd; border-radius:5px; font-size:13px;">
+             <strong>Total: ${paradas.length} parada(s) crítica(s)</strong>
+           </div>`;
+
+           document.getElementById('paradas-criticas-conteudo').innerHTML = html;
+         }).buscarParadasTurnoAtual(maquina, turno, dataProducao);
+      }
+
+      function fecharModalParadas() {
+         document.getElementById('modal-paradas-criticas').style.display = 'none';
       }
 
       function abrirModal(maquina, turnoAtual) {
