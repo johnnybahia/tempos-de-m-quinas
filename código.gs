@@ -261,31 +261,35 @@ function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
 // === BUSCA RELATÓRIO POR FAMÍLIA ===
 function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetPainel = ss.getSheetByName("PAINEL");
+  const sheet = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
 
-  if (!sheetPainel) {
-    Logger.log("ERRO: Aba PAINEL não encontrada");
-    return { erro: "Aba PAINEL não encontrada" };
+  if (!sheet) {
+    Logger.log("ERRO: Aba 'Pagina' não encontrada");
+    return { erro: "Aba 'Pagina' não encontrada" };
   }
 
-  const dados = sheetPainel.getDataRange().getValues();
+  const dados = sheet.getDataRange().getValues();
   const timezone = ss.getSpreadsheetTimeZone();
 
   Logger.log("=== buscarRelatorioFamilia ===");
   Logger.log("Família: " + familia);
   Logger.log("Período: " + dataInicio + " até " + dataFim);
+  Logger.log("Total linhas: " + dados.length);
 
-  // Estrutura da aba PAINEL:
-  // Col 0: MÁQUINAS | Col 1: TURNO | Col 2: DATA
-  // Col 3: LIGADA | Col 4: DESLIGADA
-  // Col 5: TEMPOS > 3 min | Col 6: TEMPOS > 10 min | ...
+  // Estrutura da aba "Pagina" (16 colunas):
+  // Col 0: MÁQUINAS | Col 1: CUSTO MO | Col 2: TURNO | Col 3: DATA
+  // Col 4: LIGADA | Col 5: DESLIGADA
+  // Col 6: TEMPOS > 3 min | Col 7: TEMPOS > 10 min
+  // Col 8: TEMPOS > 20 min | Col 9: TEMPOS > 30 min
+  // Col 10: MOTIVO | Col 11: MOTIVO(dup) | Col 12: SERVIÇOS
+  // Col 13: PEÇAS | Col 14: CUSTO PEÇAS | Col 15: DATA FAB
 
   const maquinasPorFamilia = {};
   let totalRodandoSeg = 0;
   let totalParadoSeg = 0;
   let totalParadasCriticas = 0;
 
-  // Percorrer dados do PAINEL
+  // Percorrer dados da aba Pagina
   for (let i = 1; i < dados.length; i++) {
     const linha = dados[i];
     const nomeMaquina = String(linha[0]).trim();
@@ -295,22 +299,44 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
       continue;
     }
 
-    const turno = String(linha[1]).trim();
-    const dataLinha = lerDataBR(linha[2]);
+    const turno = String(linha[2]).trim(); // Col 2: TURNO
+    const dataLinha = lerDataBR(linha[3]); // Col 3: DATA
     const dataLinhaStr = Utilities.formatDate(dataLinha, timezone, "yyyy-MM-dd");
 
+    Logger.log(`Linha ${i}: ${nomeMaquina} | ${turno} | ${dataLinhaStr}`);
+
     // Filtrar por data
-    if (dataInicio && dataLinhaStr < dataInicio) continue;
-    if (dataFim && dataLinhaStr > dataFim) continue;
+    if (dataInicio && dataLinhaStr < dataInicio) {
+      Logger.log(`  ⊗ Rejeitada (antes de ${dataInicio})`);
+      continue;
+    }
+    if (dataFim && dataLinhaStr > dataFim) {
+      Logger.log(`  ⊗ Rejeitada (depois de ${dataFim})`);
+      continue;
+    }
+
+    Logger.log("  ✓ Aceita");
 
     // Extrair dados
-    const ligada = linha[3]; // Fração de dia
-    const desligada = linha[4]; // Fração de dia
-    const paradasCriticas = String(linha[5] || "").trim(); // "00:05:30, 00:12:00, ..."
+    const ligada = linha[4]; // Col 4: LIGADA
+    const desligada = linha[5]; // Col 5: DESLIGADA
+    const paradasCriticas = String(linha[6] || "").trim(); // Col 6: TEMPOS > 3 min
 
-    // Converter frações de dia para segundos
-    const ligadaSeg = typeof ligada === 'number' ? Math.round(ligada * 86400) : 0;
-    const desligadaSeg = typeof desligada === 'number' ? Math.round(desligada * 86400) : 0;
+    // Converter para segundos (pode ser Date object ou número)
+    let ligadaSeg = 0;
+    let desligadaSeg = 0;
+
+    if (ligada instanceof Date) {
+      ligadaSeg = ligada.getHours() * 3600 + ligada.getMinutes() * 60 + ligada.getSeconds();
+    } else if (typeof ligada === 'number') {
+      ligadaSeg = Math.round(ligada * 86400);
+    }
+
+    if (desligada instanceof Date) {
+      desligadaSeg = desligada.getHours() * 3600 + desligada.getMinutes() * 60 + desligada.getSeconds();
+    } else if (typeof desligada === 'number') {
+      desligadaSeg = Math.round(desligada * 86400);
+    }
 
     // Contar paradas críticas (separadas por vírgula)
     let qtdParadas = 0;
@@ -333,7 +359,7 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
       turno: turno,
       rodando: formatarHoraExcel(ligada),
       parado: formatarHoraExcel(desligada),
-      paradasCriticas: paradasCriticas === "-" ? "-" : paradasCriticas
+      paradasCriticas: formatarCelulaParada(linha[6])
     });
   }
 
