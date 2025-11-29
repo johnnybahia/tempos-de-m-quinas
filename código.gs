@@ -180,10 +180,10 @@ function buscarDadosTempoReal() {
 // SIMPLIFICADO: Busca diretamente na aba "Pagina"
 function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
+  const sheet = ss.getSheetByName("PAINEL");
 
   if (!sheet) {
-    Logger.log("ERRO: Aba 'Pagina' não encontrada");
+    Logger.log("ERRO: Aba 'PAINEL' não encontrada");
     return [];
   }
 
@@ -199,20 +199,19 @@ function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
   Logger.log("Turno: " + turnoNome);
   Logger.log("Data: " + dataBuscaStr);
 
-  // Estrutura da aba "Pagina" (16 colunas):
-  // Col 0: MÁQUINAS | Col 1: CUSTO MO | Col 2: TURNO | Col 3: DATA
-  // Col 4: LIGADA | Col 5: DESLIGADA
-  // Col 6: TEMPOS > 3 min | Col 7: TEMPOS > 10 min
-  // Col 8: TEMPOS > 20 min | Col 9: TEMPOS > 30 min
-  // Col 10: MOTIVO | Col 11: MOTIVO(dup) | Col 12: SERVIÇOS
-  // Col 13: PEÇAS | Col 14: CUSTO PEÇAS | Col 15: DATA FAB
+  // Estrutura da aba "PAINEL":
+  // Col 0: MÁQUINAS | Col 1: TURNO | Col 2: DATA
+  // Col 3: LIGADA | Col 4: DESLIGADA
+  // Col 5: TEMPOS > 3 min ← APENAS ESTA COLUNA
+  // Col 6: TEMPOS > 10 min | Col 7: TEMPOS > 20 min | Col 8: TEMPOS > 30 min
+  // Col 9: CUSTO MÃO DE OBRA | Col 10: MOTIVO DA PARADA | ...
 
   // Procurar a linha que corresponde
   for (let i = 1; i < dados.length; i++) {
     let linha = dados[i];
     let maqLinha = String(linha[0]).trim();
-    let turnoLinha = String(linha[2]).trim();
-    let dataLinha = lerDataBR(linha[3]);
+    let turnoLinha = String(linha[1]).trim();
+    let dataLinha = lerDataBR(linha[2]);
     let dataLinhaStr = Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy");
 
     // Verificar se é a linha correta (máquina + turno + data)
@@ -221,50 +220,36 @@ function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
 
       const paradas = [];
 
-      // Processar TODAS as 4 colunas de tempo
-      const categorias = [
-        { coluna: 6, nome: "> 3 min" },
-        { coluna: 7, nome: "> 10 min" },
-        { coluna: 8, nome: "> 20 min" },
-        { coluna: 9, nome: "> 30 min" }
-      ];
+      // Processar APENAS a coluna "> 3 min" (col 5)
+      const temposStr = String(linha[5] || "").trim();
 
-      categorias.forEach(cat => {
-        const temposStr = String(linha[cat.coluna] || "").trim();
+      if (temposStr && temposStr !== "-" && temposStr !== "") {
+        Logger.log("> 3 min: " + temposStr);
 
-        if (temposStr && temposStr !== "-" && temposStr !== "") {
-          Logger.log(cat.nome + ": " + temposStr);
+        // Separar por vírgula
+        const tempos = temposStr.split(",");
 
-          // Separar por vírgula
-          const tempos = temposStr.split(",");
+        tempos.forEach(tempo => {
+          tempo = tempo.trim();
+          if (tempo && tempo.includes(":")) {
+            // Parsear HH:MM:SS ou HH:MM
+            const partes = tempo.split(":");
+            const h = parseInt(partes[0]) || 0;
+            const m = parseInt(partes[1]) || 0;
+            const s = partes.length > 2 ? (parseInt(partes[2]) || 0) : 0;
+            const duracaoSeg = h * 3600 + m * 60 + s;
 
-          tempos.forEach(tempo => {
-            tempo = tempo.trim();
-            if (tempo && tempo.includes(":")) {
-              // Parsear HH:MM:SS ou HH:MM
-              const partes = tempo.split(":");
-              const h = parseInt(partes[0]) || 0;
-              const m = parseInt(partes[1]) || 0;
-              const s = partes.length > 2 ? (parseInt(partes[2]) || 0) : 0;
-              const duracaoSeg = h * 3600 + m * 60 + s;
-
-              if (duracaoSeg > 0) {
-                // Formato 00:00 (sem segundos)
-                const tempoFormatado = String(h).padStart(2, '0') + ":" + String(m).padStart(2, '0');
-
-                paradas.push({
-                  categoria: cat.nome,
-                  duracao: duracaoSeg,
-                  duracaoFmt: tempoFormatado,
-                  horario: "-"
-                });
-              }
+            if (duracaoSeg > 0) {
+              paradas.push({
+                duracao: duracaoSeg,
+                duracaoFmt: tempo
+              });
             }
-          });
-        }
-      });
+          }
+        });
+      }
 
-      Logger.log("Total paradas: " + paradas.length);
+      Logger.log("Total paradas > 3min: " + paradas.length);
       return paradas;
     }
   }
