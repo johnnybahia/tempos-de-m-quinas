@@ -652,7 +652,8 @@ function descobrirTurnoCompleto(hora, maq, config) {
   return null;
 }
 function formatarHoraExcel(val) {
-  if (typeof val !== 'number' || val < 0) return 0;
+  // Sempre retorna string no formato HH:MM:SS
+  if (typeof val !== 'number' || val < 0 || isNaN(val)) return "00:00:00";
   let s = Math.round(val * 86400);
   let h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
   return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
