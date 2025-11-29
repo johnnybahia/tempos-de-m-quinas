@@ -96,13 +96,18 @@ function buscarDadosTempoReal() {
       if (infoTurnoAtual) {
         nomeTurnoAtual = infoTurnoAtual.nome;
         dataProducaoAtual = new Date(agora);
-        if (infoTurnoAtual.cruzaMeiaNoite) {
-           let horaAgora = agora.getHours();
-           let horaInicio = Math.floor(infoTurnoAtual.minInicio / 60);
-           if (horaAgora < horaInicio) {
-             dataProducaoAtual.setDate(dataProducaoAtual.getDate() - 1);
-           }
+
+        // REGRA: Dia de produção vai de 07:00 às 06:59 do dia seguinte
+        // Se estamos entre 00:00 e 06:59, pertence ao dia anterior
+        let horaAgora = agora.getHours();
+        if (horaAgora < 7) {
+          // Madrugada (00:00-06:59) = dia de produção começou ontem
+          dataProducaoAtual.setDate(dataProducaoAtual.getDate() - 1);
+        } else if (infoTurnoAtual.cruzaMeiaNoite && horaAgora < Math.floor(infoTurnoAtual.minInicio / 60)) {
+          // Turno individual que cruza meia-noite (ex: Turno 2: 16:49-01:40)
+          dataProducaoAtual.setDate(dataProducaoAtual.getDate() - 1);
         }
+
         dataProducaoAtual.setHours(0,0,0,0);
       }
 
@@ -142,11 +147,17 @@ function buscarDadosTempoReal() {
         
         if (infoTurnoReg && infoTurnoReg.nome === ref.refNomeTurno) {
           let dataProdReg = new Date(dataReg);
-          if (infoTurnoReg.cruzaMeiaNoite) {
-             let h = fullDateReg.getHours();
-             let hIni = Math.floor(infoTurnoReg.minInicio / 60);
-             if (h < hIni) dataProdReg.setDate(dataProdReg.getDate() - 1);
+          let h = fullDateReg.getHours();
+
+          // REGRA: Dia de produção vai de 07:00 às 06:59 do dia seguinte
+          if (h < 7) {
+            // Madrugada (00:00-06:59) = dia de produção começou ontem
+            dataProdReg.setDate(dataProdReg.getDate() - 1);
+          } else if (infoTurnoReg.cruzaMeiaNoite && h < Math.floor(infoTurnoReg.minInicio / 60)) {
+            // Turno individual que cruza meia-noite
+            dataProdReg.setDate(dataProdReg.getDate() - 1);
           }
+
           dataProdReg.setHours(0,0,0,0);
 
           if (dataProdReg.getTime() === ref.refDataProducao) {
@@ -505,11 +516,17 @@ function gerarRelatorioTurnos() {
       let horaObj = new Date(hora);
       if (!isNaN(horaObj.getTime())) { dataFim.setHours(horaObj.getHours(), horaObj.getMinutes(), horaObj.getSeconds(), 0); }
       let dataProducao = new Date(dataFim);
-      if (infoTurno.cruzaMeiaNoite) {
-         let horaReg = dataFim.getHours();
-         let horaInicio = Math.floor(infoTurno.minInicio / 60);
-         if (horaReg < horaInicio) dataProducao.setDate(dataProducao.getDate() - 1);
+      let horaReg = dataFim.getHours();
+
+      // REGRA: Dia de produção vai de 07:00 às 06:59 do dia seguinte
+      if (horaReg < 7) {
+        // Madrugada (00:00-06:59) = dia de produção começou ontem
+        dataProducao.setDate(dataProducao.getDate() - 1);
+      } else if (infoTurno.cruzaMeiaNoite && horaReg < Math.floor(infoTurno.minInicio / 60)) {
+        // Turno individual que cruza meia-noite
+        dataProducao.setDate(dataProducao.getDate() - 1);
       }
+
       processarRegistro(resumo, ss, maquina, dataProducao, infoTurno.nome, nomeEvento, duracao);
     }
   }
@@ -526,11 +543,17 @@ function gerarRelatorioTurnos() {
     
     if (infoTurnoAgora && infoTurnoAgora.nome === item.turno) {
       let dataProdAgora = new Date(agora);
-      if (infoTurnoAgora.cruzaMeiaNoite) {
-         let h = agora.getHours();
-         let hIni = Math.floor(infoTurnoAgora.minInicio / 60);
-         if (h < hIni) dataProdAgora.setDate(dataProdAgora.getDate() - 1);
+      let h = agora.getHours();
+
+      // REGRA: Dia de produção vai de 07:00 às 06:59 do dia seguinte
+      if (h < 7) {
+        // Madrugada (00:00-06:59) = dia de produção começou ontem
+        dataProdAgora.setDate(dataProdAgora.getDate() - 1);
+      } else if (infoTurnoAgora.cruzaMeiaNoite && h < Math.floor(infoTurnoAgora.minInicio / 60)) {
+        // Turno individual que cruza meia-noite
+        dataProdAgora.setDate(dataProdAgora.getDate() - 1);
       }
+
       dataProdAgora.setHours(0,0,0,0);
       let dataItem = new Date(item.data);
       dataItem.setHours(0,0,0,0);
