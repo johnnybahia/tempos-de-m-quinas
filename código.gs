@@ -835,3 +835,64 @@ function testarBuscaHistorica() {
 
   Logger.log("\n=== FIM DO TESTE ===");
 }
+
+// Função para testar busca de histórico com data de hoje
+function testarHistoricoHoje() {
+  Logger.log("=== TESTE HISTÓRICO HOJE ===");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
+
+  if (!sheet) {
+    Logger.log("⚠ Aba 'Pagina' não encontrada");
+    return;
+  }
+
+  const dados = sheet.getDataRange().getValues();
+  const timezone = ss.getSpreadsheetTimeZone();
+
+  // Pegar a primeira máquina
+  const maquinaTeste = dados.length > 1 ? String(dados[1][0]).trim() : "";
+
+  if (!maquinaTeste) {
+    Logger.log("⚠ Nenhuma máquina encontrada");
+    return;
+  }
+
+  // Data de hoje no formato yyyy-MM-dd (igual ao frontend)
+  const hoje = new Date();
+  const hojeStr = Utilities.formatDate(hoje, timezone, "yyyy-MM-dd");
+
+  Logger.log("Máquina: " + maquinaTeste);
+  Logger.log("Data de hoje: " + hojeStr);
+  Logger.log("");
+
+  // Mostrar todas as datas disponíveis para essa máquina
+  Logger.log("Datas disponíveis para " + maquinaTeste + ":");
+  for (let i = 1; i < dados.length; i++) {
+    let maq = String(dados[i][0]).trim();
+    if (maq === maquinaTeste) {
+      let dataOriginal = dados[i][3];
+      let dataConvertida = lerDataBR(dataOriginal);
+      let dataStr = Utilities.formatDate(dataConvertida, timezone, "yyyy-MM-dd");
+      let turno = dados[i][2];
+
+      Logger.log("  Linha " + (i+1) + ": " + dataStr + " (" + turno + ")");
+    }
+  }
+
+  Logger.log("");
+  Logger.log("Chamando buscarHistorico('" + maquinaTeste + "', '" + hojeStr + "', '" + hojeStr + "')...");
+
+  const resultado = buscarHistorico(maquinaTeste, hojeStr, hojeStr);
+
+  Logger.log("");
+  Logger.log("Resultado: " + resultado.length + " registros");
+
+  if (resultado.length > 0) {
+    Logger.log("Primeiro registro:");
+    Logger.log(JSON.stringify(resultado[0], null, 2));
+  }
+
+  Logger.log("\n=== FIM DO TESTE ===");
+}
