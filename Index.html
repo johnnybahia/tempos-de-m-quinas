@@ -310,10 +310,25 @@
       }
 
       function atualizarTempoReal() {
-        google.script.run.withSuccessHandler(renderizarCards).buscarDadosTempoReal();
+        google.script.run
+          .withSuccessHandler(renderizarCards)
+          .withFailureHandler(function(error) {
+            console.error('Erro ao buscar dados:', error);
+            const container = document.getElementById('maquinas-grid');
+            container.innerHTML = '<div style="text-align:center;padding:20px;color:#dc3545;">⚠️ Erro ao conectar com o servidor: ' + error.message + '</div>';
+          })
+          .buscarDadosTempoReal();
       }
 
       function renderizarCards(dados) {
+        // Proteção: verificar se dados é válido
+        if (!dados || typeof dados !== 'object') {
+          console.error('Erro: dados inválidos recebidos', dados);
+          const container = document.getElementById('maquinas-grid');
+          container.innerHTML = '<div style="text-align:center;padding:20px;color:#dc3545;">⚠️ Erro ao carregar dados das máquinas. Tente recarregar a página.</div>';
+          return;
+        }
+
         MaquinasData = dados;
         const container = document.getElementById('maquinas-grid');
 
