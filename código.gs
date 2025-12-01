@@ -173,6 +173,45 @@ function buscarDadosTempoReal() {
       }
     }
   }
+
+  // Buscar horário de início do PAINEL para cada máquina
+  const sheetPainel = ss.getSheetByName("PAINEL");
+  if (sheetPainel) {
+    const dadosPainel = sheetPainel.getDataRange().getValues();
+    const timezone = ss.getSpreadsheetTimeZone();
+
+    for (let maq in statusMaquinas) {
+      const info = statusMaquinas[maq];
+      if (info.refNomeTurno !== "Fora de Turno" && info.refDataProducao !== null) {
+        const dataBusca = new Date(info.refDataProducao);
+        const dataBuscaStr = Utilities.formatDate(dataBusca, timezone, "dd/MM/yyyy");
+
+        // Procurar no PAINEL a linha correspondente
+        for (let i = 1; i < dadosPainel.length; i++) {
+          const linha = dadosPainel[i];
+          const maqPainel = String(linha[0]).trim();
+          const turnoPainel = String(linha[1]).trim();
+          let dataPainelStr = "";
+
+          if (linha[2] instanceof Date) {
+            dataPainelStr = Utilities.formatDate(linha[2], timezone, "dd/MM/yyyy");
+          } else {
+            dataPainelStr = String(linha[2]).trim();
+          }
+
+          if (maqPainel === maq && turnoPainel === info.refNomeTurno && dataPainelStr === dataBuscaStr) {
+            // Coluna 15 (índice 15) tem o horário de início
+            const horarioInicio = linha[15];
+            if (horarioInicio && horarioInicio !== "") {
+              info.horarioInicio = horarioInicio;
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+
   return statusMaquinas;
 }
 
@@ -708,7 +747,7 @@ function gerarRelatorioTurnos() {
         Logger.log(`Linha ${i+1}: ${maquina} | ${nomeEvento} | Raw: ${duracaoRaw} | Segundos: ${duracao} | Turno: ${infoTurno.nome}`);
       }
 
-      processarRegistro(resumo, ss, maquina, dataProducao, infoTurno.nome, nomeEvento, duracao);
+      processarRegistro(resumo, ss, maquina, dataProducao, infoTurno.nome, nomeEvento, duracao, hora);
       contadores.processadas++;
     } else {
       contadores.semTurno++;
@@ -730,11 +769,56 @@ function gerarRelatorioTurnos() {
 
   const linhasSaida = [];
   const SEGUNDOS_DIA = 86400;
-  
+
   for (let chave in resumo) {
     let item = resumo[chave];
     let rowFinal = [];
-    
+
+    // CALCULAR TEMPO DE PARADA INICIAL (do início do turno até começar a rodar)
+    if (item.horarioInicio) {
+      let configMaq = configTurnos[item.maquina];
+      if (configMaq) {
+        // Encontrar o turno específico (Turno 1, 2 ou 3)
+        let turnoConfig = configMaq.find(t => t.nome === item.turno);
+        if (turnoConfig && turnoConfig.inicio) {
+          // Criar data/hora do início do turno
+          let dataInicioTurno = new Date(item.data);
+          let horaInicioTurno = new Date(turnoConfig.inicio);
+          if (!isNaN(horaInicioTurno.getTime())) {
+            dataInicioTurno.setHours(horaInicioTurno.getHours(), horaInicioTurno.getMinutes(), horaInicioTurno.getSeconds(), 0);
+
+            // Criar data/hora de quando a máquina começou a rodar
+            let horaMaquinaInicio = new Date(item.horarioInicio);
+
+            // Calcular diferença em segundos
+            let diferencaSegundos = Math.floor((horaMaquinaInicio.getTime() - dataInicioTurno.getTime()) / 1000);
+
+            // Se a diferença for positiva e significativa (>= 60 segundos = 1 min)
+            if (diferencaSegundos >= 60) {
+              Logger.log(`${item.maquina} ${item.turno}: Parada inicial de ${diferencaSegundos}s (${Math.floor(diferencaSegundos/60)}min)`);
+
+              // Adicionar ao tempo total de parada
+              item.desligada += diferencaSegundos;
+
+              // Adicionar nas listas de paradas conforme os thresholds
+              if (diferencaSegundos > 180) {  // > 3 min
+                item.listaStop3.unshift(diferencaSegundos);  // unshift = adiciona no início
+              }
+              if (diferencaSegundos > 600) {  // > 10 min
+                item.listaStop10.unshift(diferencaSegundos);
+              }
+              if (diferencaSegundos > 1200) {  // > 20 min
+                item.listaStop20.unshift(diferencaSegundos);
+              }
+              if (diferencaSegundos > 1800) {  // > 30 min
+                item.listaStop30.unshift(diferencaSegundos);
+              }
+            }
+          }
+        }
+      }
+    }
+
     let infoTurnoAgora = descobrirTurnoCompleto(agora, item.maquina, configTurnos);
     let ehTurnoAtual = false;
     
@@ -763,20 +847,31 @@ function gerarRelatorioTurnos() {
        rowFinal = mapaPainelExistente[chave];
     } else {
        let manual = { motivo: "", servico: "", pecas: "", custoPecas: "", obs: "" };
+       let horarioInicioAnterior = "";
        if (mapaPainelExistente[chave]) {
           let old = mapaPainelExistente[chave];
           manual = { motivo: old[10], servico: old[11], pecas: old[12], custoPecas: old[13], obs: old[14] };
+          horarioInicioAnterior = old[15] || "";
        }
 
        let tempoParadoLiq = Math.max(0, item.desligada - 3600);
        let custoMO = (tempoParadoLiq / 3600) * (mapaCustos[item.maquina] || 0);
        let valLigada = Math.max(0, item.ligada) / SEGUNDOS_DIA;
        let valDesligada = Math.max(0, item.desligada) / SEGUNDOS_DIA;
-       
+
+       // Formatar horário de início
+       let horarioInicioStr = horarioInicioAnterior;
+       if (item.horarioInicio) {
+         let horaObj = new Date(item.horarioInicio);
+         if (!isNaN(horaObj.getTime())) {
+           horarioInicioStr = Utilities.formatDate(horaObj, ss.getSpreadsheetTimeZone(), "HH:mm:ss");
+         }
+       }
+
        rowFinal = [
-          item.maquina, item.turno, item.data, valLigada, valDesligada, 
-          formatarListaTempos(item.listaStop3), formatarListaTempos(item.listaStop10), formatarListaTempos(item.listaStop20), formatarListaTempos(item.listaStop30), 
-          custoMO, manual.motivo, manual.servico, manual.pecas, manual.custoPecas, manual.obs
+          item.maquina, item.turno, item.data, valLigada, valDesligada,
+          formatarListaTempos(item.listaStop3), formatarListaTempos(item.listaStop10), formatarListaTempos(item.listaStop20), formatarListaTempos(item.listaStop30),
+          custoMO, manual.motivo, manual.servico, manual.pecas, manual.custoPecas, manual.obs, horarioInicioStr
        ];
     }
     
@@ -789,7 +884,7 @@ function gerarRelatorioTurnos() {
   }
   
   sheetPainel.clearContents();
-  const cabecalho = [[ "MÁQUINAS", "TURNO", "DATA", "LIGADA", "DESLIGADA", "TEMPOS > 3 min", "TEMPOS > 10 min", "TEMPOS > 20 min", "TEMPOS > 30 min", "CUSTO MÃO DE OBRA", "MOTIVO DA PARADA", "SERVIÇOS REALIZADOS", "PEÇAS TROCADAS", "CUSTO PEÇAS", "OBSERVAÇÃO" ]];
+  const cabecalho = [[ "MÁQUINAS", "TURNO", "DATA", "LIGADA", "DESLIGADA", "TEMPOS > 3 min", "TEMPOS > 10 min", "TEMPOS > 20 min", "TEMPOS > 30 min", "CUSTO MÃO DE OBRA", "MOTIVO DA PARADA", "SERVIÇOS REALIZADOS", "PEÇAS TROCADAS", "CUSTO PEÇAS", "OBSERVAÇÃO", "HORÁRIO INÍCIO" ]];
   sheetPainel.getRange(1, 1, 1, cabecalho[0].length).setValues(cabecalho).setFontWeight("bold");
   
   if (linhasSaida.length > 0) {
@@ -938,12 +1033,17 @@ function formatarCelulaParada(val) {
   // Se já é string, retornar direto
   return String(val);
 }
-function processarRegistro(resumo, ss, maquina, data, turno, evento, segundos) {
+function processarRegistro(resumo, ss, maquina, data, turno, evento, segundos, horarioEvento) {
   if (segundos > 86400) return;
   if (segundos < 0) segundos = 0;
   let dStr = Utilities.formatDate(data, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy");
   let chave = maquina + "|" + dStr + "|" + turno;
-  if (!resumo[chave]) resumo[chave] = { maquina: maquina, data: data, turno: turno, ligada: 0, desligada: 0, listaStop3: [], listaStop10: [], listaStop20: [], listaStop30: [] };
+  if (!resumo[chave]) resumo[chave] = { maquina: maquina, data: data, turno: turno, ligada: 0, desligada: 0, listaStop3: [], listaStop10: [], listaStop20: [], listaStop30: [], horarioInicio: null };
+
+  // Capturar horário do primeiro "TEMPO PARADA" (indica quando a máquina começou a rodar)
+  if (evento === "TEMPO PARADA" && !resumo[chave].horarioInicio && horarioEvento) {
+    resumo[chave].horarioInicio = horarioEvento;
+  }
 
   if (evento === "TEMPO PRODUZINDO") {
     resumo[chave].ligada += segundos;

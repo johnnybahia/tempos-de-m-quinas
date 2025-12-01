@@ -396,6 +396,14 @@
               const ultimoEvento = new Date(maq.timestamp);
               const debugInfo = `Último: ${ultimoEvento.toLocaleTimeString('pt-BR')} - ${maq.ultimoEvento}`;
 
+              // Exibir horário de início se disponível
+              let horarioInicioHTML = '';
+              if (maq.horarioInicio && maq.horarioInicio !== "") {
+                horarioInicioHTML = `<div style="font-size:10px; color:#666; text-align:center; margin-bottom:5px;">
+                  🕐 Início turno: ${maq.horarioInicio}
+                </div>`;
+              }
+
               card.innerHTML = `
                 <div class="card-title">${maq.nome}</div>
                 <div class="card-status" style="background:${cor}">${estadoTxt}</div>
@@ -403,6 +411,7 @@
                 <div style="font-size:9px; color:#999; text-align:center; margin-bottom:8px;" title="${debugInfo}">
                   Desde: ${ultimoEvento.toLocaleTimeString('pt-BR')}
                 </div>
+                ${horarioInicioHTML}
                 <div class="card-daily-totals">
                   <div class="daily-row"><span class="daily-val-prod">Produzindo: ${prodDia}</span></div>
                   <div class="daily-row"><span class="daily-val-stop">Parado: ${stopDia}</span></div>
