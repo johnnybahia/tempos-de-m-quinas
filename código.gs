@@ -175,41 +175,48 @@ function buscarDadosTempoReal() {
   }
 
   // Buscar horário de início do PAINEL para cada máquina
-  const sheetPainel = ss.getSheetByName("PAINEL");
-  if (sheetPainel) {
-    const dadosPainel = sheetPainel.getDataRange().getValues();
-    const timezone = ss.getSpreadsheetTimeZone();
+  try {
+    const sheetPainel = ss.getSheetByName("PAINEL");
+    if (sheetPainel) {
+      const dadosPainel = sheetPainel.getDataRange().getValues();
+      const timezone = ss.getSpreadsheetTimeZone();
 
-    for (let maq in statusMaquinas) {
-      const info = statusMaquinas[maq];
-      if (info.refNomeTurno !== "Fora de Turno" && info.refDataProducao !== null) {
-        const dataBusca = new Date(info.refDataProducao);
-        const dataBuscaStr = Utilities.formatDate(dataBusca, timezone, "dd/MM/yyyy");
+      for (let maq in statusMaquinas) {
+        const info = statusMaquinas[maq];
+        if (info.refNomeTurno !== "Fora de Turno" && info.refDataProducao !== null) {
+          const dataBusca = new Date(info.refDataProducao);
+          const dataBuscaStr = Utilities.formatDate(dataBusca, timezone, "dd/MM/yyyy");
 
-        // Procurar no PAINEL a linha correspondente
-        for (let i = 1; i < dadosPainel.length; i++) {
-          const linha = dadosPainel[i];
-          const maqPainel = String(linha[0]).trim();
-          const turnoPainel = String(linha[1]).trim();
-          let dataPainelStr = "";
+          // Procurar no PAINEL a linha correspondente
+          for (let i = 1; i < dadosPainel.length; i++) {
+            const linha = dadosPainel[i];
+            if (!linha || linha.length < 16) continue; // Proteção: verificar se a linha existe e tem todas as colunas
 
-          if (linha[2] instanceof Date) {
-            dataPainelStr = Utilities.formatDate(linha[2], timezone, "dd/MM/yyyy");
-          } else {
-            dataPainelStr = String(linha[2]).trim();
-          }
+            const maqPainel = String(linha[0] || "").trim();
+            const turnoPainel = String(linha[1] || "").trim();
+            let dataPainelStr = "";
 
-          if (maqPainel === maq && turnoPainel === info.refNomeTurno && dataPainelStr === dataBuscaStr) {
-            // Coluna 15 (índice 15) tem o horário de início
-            const horarioInicio = linha[15];
-            if (horarioInicio && horarioInicio !== "") {
-              info.horarioInicio = horarioInicio;
+            if (linha[2] instanceof Date) {
+              dataPainelStr = Utilities.formatDate(linha[2], timezone, "dd/MM/yyyy");
+            } else {
+              dataPainelStr = String(linha[2] || "").trim();
             }
-            break;
+
+            if (maqPainel === maq && turnoPainel === info.refNomeTurno && dataPainelStr === dataBuscaStr) {
+              // Coluna 15 (índice 15) tem o horário de início
+              const horarioInicio = linha[15];
+              if (horarioInicio && horarioInicio !== "") {
+                info.horarioInicio = horarioInicio;
+              }
+              break;
+            }
           }
         }
       }
     }
+  } catch (e) {
+    Logger.log("Erro ao buscar horário de início do PAINEL: " + e.message);
+    // Continuar sem o horário de início
   }
 
   return statusMaquinas;
@@ -775,48 +782,55 @@ function gerarRelatorioTurnos() {
     let rowFinal = [];
 
     // CALCULAR TEMPO DE PARADA INICIAL (do início do turno até começar a rodar)
-    if (item.horarioInicio) {
-      let configMaq = configTurnos[item.maquina];
-      if (configMaq) {
-        // Encontrar o turno específico (Turno 1, 2 ou 3)
-        let turnoConfig = configMaq.find(t => t.nome === item.turno);
-        if (turnoConfig && turnoConfig.inicio) {
-          // Criar data/hora do início do turno
-          let dataInicioTurno = new Date(item.data);
-          let horaInicioTurno = new Date(turnoConfig.inicio);
-          if (!isNaN(horaInicioTurno.getTime())) {
-            dataInicioTurno.setHours(horaInicioTurno.getHours(), horaInicioTurno.getMinutes(), horaInicioTurno.getSeconds(), 0);
+    try {
+      if (item.horarioInicio) {
+        let configMaq = configTurnos[item.maquina];
+        if (configMaq) {
+          // Encontrar o turno específico (Turno 1, 2 ou 3)
+          let turnoConfig = configMaq.find(t => t.nome === item.turno);
+          if (turnoConfig && turnoConfig.inicio) {
+            // Criar data/hora do início do turno
+            let dataInicioTurno = new Date(item.data);
+            let horaInicioTurno = new Date(turnoConfig.inicio);
+            if (!isNaN(horaInicioTurno.getTime()) && !isNaN(dataInicioTurno.getTime())) {
+              dataInicioTurno.setHours(horaInicioTurno.getHours(), horaInicioTurno.getMinutes(), horaInicioTurno.getSeconds(), 0);
 
-            // Criar data/hora de quando a máquina começou a rodar
-            let horaMaquinaInicio = new Date(item.horarioInicio);
+              // Criar data/hora de quando a máquina começou a rodar
+              let horaMaquinaInicio = new Date(item.horarioInicio);
 
-            // Calcular diferença em segundos
-            let diferencaSegundos = Math.floor((horaMaquinaInicio.getTime() - dataInicioTurno.getTime()) / 1000);
+              // Calcular diferença em segundos
+              if (!isNaN(horaMaquinaInicio.getTime())) {
+                let diferencaSegundos = Math.floor((horaMaquinaInicio.getTime() - dataInicioTurno.getTime()) / 1000);
 
-            // Se a diferença for positiva e significativa (>= 60 segundos = 1 min)
-            if (diferencaSegundos >= 60) {
-              Logger.log(`${item.maquina} ${item.turno}: Parada inicial de ${diferencaSegundos}s (${Math.floor(diferencaSegundos/60)}min)`);
+                // Se a diferença for positiva e significativa (>= 60 segundos = 1 min)
+                if (diferencaSegundos >= 60) {
+                  Logger.log(`${item.maquina} ${item.turno}: Parada inicial de ${diferencaSegundos}s (${Math.floor(diferencaSegundos/60)}min)`);
 
-              // Adicionar ao tempo total de parada
-              item.desligada += diferencaSegundos;
+                  // Adicionar ao tempo total de parada
+                  item.desligada += diferencaSegundos;
 
-              // Adicionar nas listas de paradas conforme os thresholds
-              if (diferencaSegundos > 180) {  // > 3 min
-                item.listaStop3.unshift(diferencaSegundos);  // unshift = adiciona no início
-              }
-              if (diferencaSegundos > 600) {  // > 10 min
-                item.listaStop10.unshift(diferencaSegundos);
-              }
-              if (diferencaSegundos > 1200) {  // > 20 min
-                item.listaStop20.unshift(diferencaSegundos);
-              }
-              if (diferencaSegundos > 1800) {  // > 30 min
-                item.listaStop30.unshift(diferencaSegundos);
+                  // Adicionar nas listas de paradas conforme os thresholds
+                  if (diferencaSegundos > 180) {  // > 3 min
+                    item.listaStop3.unshift(diferencaSegundos);  // unshift = adiciona no início
+                  }
+                  if (diferencaSegundos > 600) {  // > 10 min
+                    item.listaStop10.unshift(diferencaSegundos);
+                  }
+                  if (diferencaSegundos > 1200) {  // > 20 min
+                    item.listaStop20.unshift(diferencaSegundos);
+                  }
+                  if (diferencaSegundos > 1800) {  // > 30 min
+                    item.listaStop30.unshift(diferencaSegundos);
+                  }
+                }
               }
             }
           }
         }
       }
+    } catch (e) {
+      Logger.log(`Erro ao calcular parada inicial para ${item.maquina} ${item.turno}: ${e.message}`);
+      // Continuar sem adicionar a parada inicial
     }
 
     let infoTurnoAgora = descobrirTurnoCompleto(agora, item.maquina, configTurnos);
