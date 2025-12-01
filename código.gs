@@ -769,11 +769,56 @@ function gerarRelatorioTurnos() {
 
   const linhasSaida = [];
   const SEGUNDOS_DIA = 86400;
-  
+
   for (let chave in resumo) {
     let item = resumo[chave];
     let rowFinal = [];
-    
+
+    // CALCULAR TEMPO DE PARADA INICIAL (do início do turno até começar a rodar)
+    if (item.horarioInicio) {
+      let configMaq = configTurnos[item.maquina];
+      if (configMaq) {
+        // Encontrar o turno específico (Turno 1, 2 ou 3)
+        let turnoConfig = configMaq.find(t => t.nome === item.turno);
+        if (turnoConfig && turnoConfig.inicio) {
+          // Criar data/hora do início do turno
+          let dataInicioTurno = new Date(item.data);
+          let horaInicioTurno = new Date(turnoConfig.inicio);
+          if (!isNaN(horaInicioTurno.getTime())) {
+            dataInicioTurno.setHours(horaInicioTurno.getHours(), horaInicioTurno.getMinutes(), horaInicioTurno.getSeconds(), 0);
+
+            // Criar data/hora de quando a máquina começou a rodar
+            let horaMaquinaInicio = new Date(item.horarioInicio);
+
+            // Calcular diferença em segundos
+            let diferencaSegundos = Math.floor((horaMaquinaInicio.getTime() - dataInicioTurno.getTime()) / 1000);
+
+            // Se a diferença for positiva e significativa (>= 60 segundos = 1 min)
+            if (diferencaSegundos >= 60) {
+              Logger.log(`${item.maquina} ${item.turno}: Parada inicial de ${diferencaSegundos}s (${Math.floor(diferencaSegundos/60)}min)`);
+
+              // Adicionar ao tempo total de parada
+              item.desligada += diferencaSegundos;
+
+              // Adicionar nas listas de paradas conforme os thresholds
+              if (diferencaSegundos > 180) {  // > 3 min
+                item.listaStop3.unshift(diferencaSegundos);  // unshift = adiciona no início
+              }
+              if (diferencaSegundos > 600) {  // > 10 min
+                item.listaStop10.unshift(diferencaSegundos);
+              }
+              if (diferencaSegundos > 1200) {  // > 20 min
+                item.listaStop20.unshift(diferencaSegundos);
+              }
+              if (diferencaSegundos > 1800) {  // > 30 min
+                item.listaStop30.unshift(diferencaSegundos);
+              }
+            }
+          }
+        }
+      }
+    }
+
     let infoTurnoAgora = descobrirTurnoCompleto(agora, item.maquina, configTurnos);
     let ehTurnoAtual = false;
     
