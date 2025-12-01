@@ -52,174 +52,196 @@ function verificarLogin(usuario, senha) {
 // ==========================================================
 
 function buscarDadosTempoReal() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetDados = ss.getSheetByName("Página1");
-  const dados = sheetDados.getDataRange().getValues();
-  
-  const sheetTurnos = ss.getSheetByName("TURNOS");
-  const dadosTurnos = sheetTurnos.getDataRange().getValues();
-  const configTurnos = {};
-  for (let i = 1; i < dadosTurnos.length; i++) {
-    configTurnos[String(dadosTurnos[i][0]).trim()] = [
-       { nome: "Turno 1", inicio: dadosTurnos[i][1], fim: dadosTurnos[i][2] },
-       { nome: "Turno 2", inicio: dadosTurnos[i][3], fim: dadosTurnos[i][4] },
-       { nome: "Turno 3", inicio: dadosTurnos[i][5], fim: dadosTurnos[i][6] }
-    ];
-  }
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetDados = ss.getSheetByName("Página1");
+    if (!sheetDados) {
+      Logger.log("ERRO: Aba 'Página1' não encontrada");
+      return {};
+    }
 
-  const sheetDadosConfig = ss.getSheetByName("DADOS");
-  const mapaFamilias = {};
-  if (sheetDadosConfig) {
-    const dConfig = sheetDadosConfig.getDataRange().getValues();
-    if (dConfig.length > 0) {
-      const h = dConfig[0].map(c => String(c).toUpperCase().trim());
-      const idxM = h.indexOf("MÁQUINAS");
-      const idxF = h.findIndex(x => x.includes("FAMÍLIA") || x.includes("FAMILIA"));
-      if (idxM > -1 && idxF > -1) {
-        for (let i = 1; i < dConfig.length; i++) {
-          let m = String(dConfig[i][idxM]).trim();
-          mapaFamilias[m] = dConfig[i][idxF] || "GERAL";
+    const dados = sheetDados.getDataRange().getValues();
+    if (!dados || dados.length <= 1) {
+      Logger.log("AVISO: Aba 'Página1' está vazia");
+      return {};
+    }
+
+    const sheetTurnos = ss.getSheetByName("TURNOS");
+    if (!sheetTurnos) {
+      Logger.log("ERRO: Aba 'TURNOS' não encontrada");
+      return {};
+    }
+
+    const dadosTurnos = sheetTurnos.getDataRange().getValues();
+    const configTurnos = {};
+    for (let i = 1; i < dadosTurnos.length; i++) {
+      if (dadosTurnos[i][0]) {
+        configTurnos[String(dadosTurnos[i][0]).trim()] = [
+           { nome: "Turno 1", inicio: dadosTurnos[i][1], fim: dadosTurnos[i][2] },
+           { nome: "Turno 2", inicio: dadosTurnos[i][3], fim: dadosTurnos[i][4] },
+           { nome: "Turno 3", inicio: dadosTurnos[i][5], fim: dadosTurnos[i][6] }
+        ];
+      }
+    }
+
+    const sheetDadosConfig = ss.getSheetByName("DADOS");
+    const mapaFamilias = {};
+    if (sheetDadosConfig) {
+      const dConfig = sheetDadosConfig.getDataRange().getValues();
+      if (dConfig.length > 0) {
+        const h = dConfig[0].map(c => String(c).toUpperCase().trim());
+        const idxM = h.indexOf("MÁQUINAS");
+        const idxF = h.findIndex(x => x.includes("FAMÍLIA") || x.includes("FAMILIA"));
+        if (idxM > -1 && idxF > -1) {
+          for (let i = 1; i < dConfig.length; i++) {
+            let m = String(dConfig[i][idxM]).trim();
+            mapaFamilias[m] = dConfig[i][idxF] || "GERAL";
+          }
         }
       }
     }
-  }
 
-  const statusMaquinas = {};
-  const agora = new Date(); 
+    const statusMaquinas = {};
+    const agora = new Date();
 
-  for (let i = dados.length - 1; i > 0; i--) {
-    let linha = dados[i];
-    let maquina = String(linha[2]).trim();
-    if (!maquina) continue;
+    for (let i = dados.length - 1; i > 0; i--) {
+      let linha = dados[i];
+      let maquina = String(linha[2]).trim();
+      if (!maquina) continue;
 
-    if (!statusMaquinas[maquina]) {
-      let infoTurnoAtual = descobrirTurnoCompleto(agora, maquina, configTurnos);
-      let nomeTurnoAtual = "Fora de Turno";
-      let dataProducaoAtual = null;
+      if (!statusMaquinas[maquina]) {
+        let infoTurnoAtual = descobrirTurnoCompleto(agora, maquina, configTurnos);
+        let nomeTurnoAtual = "Fora de Turno";
+        let dataProducaoAtual = null;
 
-      if (infoTurnoAtual) {
-        nomeTurnoAtual = infoTurnoAtual.nome;
-        dataProducaoAtual = new Date(agora);
-
-        // REGRA: Dia de produção vai de 07:00 às 06:59 do dia seguinte
-        // Se estamos entre 00:00 e 06:59, pertence ao dia anterior
-        let horaAgora = agora.getHours();
-        if (horaAgora < 7) {
-          // Madrugada (00:00-06:59) = dia de produção começou ontem
-          dataProducaoAtual.setDate(dataProducaoAtual.getDate() - 1);
-        } else if (infoTurnoAtual.cruzaMeiaNoite && horaAgora < Math.floor(infoTurnoAtual.minInicio / 60)) {
-          // Turno individual que cruza meia-noite (ex: Turno 2: 16:49-01:40)
-          dataProducaoAtual.setDate(dataProducaoAtual.getDate() - 1);
-        }
-
-        dataProducaoAtual.setHours(0,0,0,0);
-      }
-
-      let dataReg = lerDataBR(linha[0]);
-      let timestampFinal;
-      let timePart = new Date(linha[1]); 
-      if (!isNaN(dataReg.getTime()) && !isNaN(timePart.getTime())) {
-         let d = new Date(dataReg);
-         d.setHours(timePart.getHours(), timePart.getMinutes(), timePart.getSeconds(), 0);
-         timestampFinal = d.getTime();
-      } else {
-         timestampFinal = new Date().getTime(); 
-      }
-
-      statusMaquinas[maquina] = {
-        ultimoEvento: linha[3],
-        timestamp: timestampFinal,
-        turnoAtual: nomeTurnoAtual,
-        familia: mapaFamilias[maquina] || "OUTROS",
-        totalProduzindo: 0,
-        totalParada: 0,
-        refNomeTurno: nomeTurnoAtual,
-        refDataProducao: dataProducaoAtual ? dataProducaoAtual.getTime() : null 
-      };
-    }
-
-    let ref = statusMaquinas[maquina];
-    if (ref.refNomeTurno !== "Fora de Turno" && ref.refDataProducao !== null) {
-      let dataReg = lerDataBR(linha[0]);
-      let horaRegObj = new Date(linha[1]);
-      
-      if (!isNaN(dataReg.getTime()) && !isNaN(horaRegObj.getTime())) {
-        let fullDateReg = new Date(dataReg);
-        fullDateReg.setHours(horaRegObj.getHours(), horaRegObj.getMinutes(), horaRegObj.getSeconds());
-        
-        let infoTurnoReg = descobrirTurnoCompleto(fullDateReg, maquina, configTurnos);
-        
-        if (infoTurnoReg && infoTurnoReg.nome === ref.refNomeTurno) {
-          let dataProdReg = new Date(dataReg);
-          let h = fullDateReg.getHours();
+        if (infoTurnoAtual) {
+          nomeTurnoAtual = infoTurnoAtual.nome;
+          dataProducaoAtual = new Date(agora);
 
           // REGRA: Dia de produção vai de 07:00 às 06:59 do dia seguinte
-          if (h < 7) {
+          // Se estamos entre 00:00 e 06:59, pertence ao dia anterior
+          let horaAgora = agora.getHours();
+          if (horaAgora < 7) {
             // Madrugada (00:00-06:59) = dia de produção começou ontem
-            dataProdReg.setDate(dataProdReg.getDate() - 1);
-          } else if (infoTurnoReg.cruzaMeiaNoite && h < Math.floor(infoTurnoReg.minInicio / 60)) {
-            // Turno individual que cruza meia-noite
-            dataProdReg.setDate(dataProdReg.getDate() - 1);
+            dataProducaoAtual.setDate(dataProducaoAtual.getDate() - 1);
+          } else if (infoTurnoAtual.cruzaMeiaNoite && horaAgora < Math.floor(infoTurnoAtual.minInicio / 60)) {
+            // Turno individual que cruza meia-noite (ex: Turno 2: 16:49-01:40)
+            dataProducaoAtual.setDate(dataProducaoAtual.getDate() - 1);
           }
 
-          dataProdReg.setHours(0,0,0,0);
+          dataProducaoAtual.setHours(0,0,0,0);
+        }
 
-          if (dataProdReg.getTime() === ref.refDataProducao) {
-             let duracao = parseDuration(linha[4]);
-             if (linha[3] === "TEMPO PRODUZINDO") ref.totalProduzindo += duracao;
-             else if (linha[3] === "TEMPO PARADA") ref.totalParada += duracao;
+        let dataReg = lerDataBR(linha[0]);
+        let timestampFinal;
+        let timePart = new Date(linha[1]);
+        if (!isNaN(dataReg.getTime()) && !isNaN(timePart.getTime())) {
+           let d = new Date(dataReg);
+           d.setHours(timePart.getHours(), timePart.getMinutes(), timePart.getSeconds(), 0);
+           timestampFinal = d.getTime();
+        } else {
+           timestampFinal = new Date().getTime();
+        }
+
+        statusMaquinas[maquina] = {
+          ultimoEvento: linha[3],
+          timestamp: timestampFinal,
+          turnoAtual: nomeTurnoAtual,
+          familia: mapaFamilias[maquina] || "OUTROS",
+          totalProduzindo: 0,
+          totalParada: 0,
+          refNomeTurno: nomeTurnoAtual,
+          refDataProducao: dataProducaoAtual ? dataProducaoAtual.getTime() : null
+        };
+      }
+
+      let ref = statusMaquinas[maquina];
+      if (ref.refNomeTurno !== "Fora de Turno" && ref.refDataProducao !== null) {
+        let dataReg = lerDataBR(linha[0]);
+        let horaRegObj = new Date(linha[1]);
+
+        if (!isNaN(dataReg.getTime()) && !isNaN(horaRegObj.getTime())) {
+          let fullDateReg = new Date(dataReg);
+          fullDateReg.setHours(horaRegObj.getHours(), horaRegObj.getMinutes(), horaRegObj.getSeconds());
+
+          let infoTurnoReg = descobrirTurnoCompleto(fullDateReg, maquina, configTurnos);
+
+          if (infoTurnoReg && infoTurnoReg.nome === ref.refNomeTurno) {
+            let dataProdReg = new Date(dataReg);
+            let h = fullDateReg.getHours();
+
+            // REGRA: Dia de produção vai de 07:00 às 06:59 do dia seguinte
+            if (h < 7) {
+              // Madrugada (00:00-06:59) = dia de produção começou ontem
+              dataProdReg.setDate(dataProdReg.getDate() - 1);
+            } else if (infoTurnoReg.cruzaMeiaNoite && h < Math.floor(infoTurnoReg.minInicio / 60)) {
+              // Turno individual que cruza meia-noite
+              dataProdReg.setDate(dataProdReg.getDate() - 1);
+            }
+
+            dataProdReg.setHours(0,0,0,0);
+
+            if (dataProdReg.getTime() === ref.refDataProducao) {
+               let duracao = parseDuration(linha[4]);
+               if (linha[3] === "TEMPO PRODUZINDO") ref.totalProduzindo += duracao;
+               else if (linha[3] === "TEMPO PARADA") ref.totalParada += duracao;
+            }
           }
         }
       }
     }
-  }
 
-  // Buscar horário de início do PAINEL para cada máquina
-  try {
-    const sheetPainel = ss.getSheetByName("PAINEL");
-    if (sheetPainel) {
-      const dadosPainel = sheetPainel.getDataRange().getValues();
-      const timezone = ss.getSpreadsheetTimeZone();
+    // Buscar horário de início do PAINEL para cada máquina
+    try {
+      const sheetPainel = ss.getSheetByName("PAINEL");
+      if (sheetPainel) {
+        const dadosPainel = sheetPainel.getDataRange().getValues();
+        const timezone = ss.getSpreadsheetTimeZone();
 
-      for (let maq in statusMaquinas) {
-        const info = statusMaquinas[maq];
-        if (info.refNomeTurno !== "Fora de Turno" && info.refDataProducao !== null) {
-          const dataBusca = new Date(info.refDataProducao);
-          const dataBuscaStr = Utilities.formatDate(dataBusca, timezone, "dd/MM/yyyy");
+        for (let maq in statusMaquinas) {
+          const info = statusMaquinas[maq];
+          if (info.refNomeTurno !== "Fora de Turno" && info.refDataProducao !== null) {
+            const dataBusca = new Date(info.refDataProducao);
+            const dataBuscaStr = Utilities.formatDate(dataBusca, timezone, "dd/MM/yyyy");
 
-          // Procurar no PAINEL a linha correspondente
-          for (let i = 1; i < dadosPainel.length; i++) {
-            const linha = dadosPainel[i];
-            if (!linha || linha.length < 16) continue; // Proteção: verificar se a linha existe e tem todas as colunas
+            // Procurar no PAINEL a linha correspondente
+            for (let i = 1; i < dadosPainel.length; i++) {
+              const linha = dadosPainel[i];
+              if (!linha || linha.length < 16) continue; // Proteção: verificar se a linha existe e tem todas as colunas
 
-            const maqPainel = String(linha[0] || "").trim();
-            const turnoPainel = String(linha[1] || "").trim();
-            let dataPainelStr = "";
+              const maqPainel = String(linha[0] || "").trim();
+              const turnoPainel = String(linha[1] || "").trim();
+              let dataPainelStr = "";
 
-            if (linha[2] instanceof Date) {
-              dataPainelStr = Utilities.formatDate(linha[2], timezone, "dd/MM/yyyy");
-            } else {
-              dataPainelStr = String(linha[2] || "").trim();
-            }
-
-            if (maqPainel === maq && turnoPainel === info.refNomeTurno && dataPainelStr === dataBuscaStr) {
-              // Coluna 15 (índice 15) tem o horário de início
-              const horarioInicio = linha[15];
-              if (horarioInicio && horarioInicio !== "") {
-                info.horarioInicio = horarioInicio;
+              if (linha[2] instanceof Date) {
+                dataPainelStr = Utilities.formatDate(linha[2], timezone, "dd/MM/yyyy");
+              } else {
+                dataPainelStr = String(linha[2] || "").trim();
               }
-              break;
+
+              if (maqPainel === maq && turnoPainel === info.refNomeTurno && dataPainelStr === dataBuscaStr) {
+                // Coluna 15 (índice 15) tem o horário de início
+                const horarioInicio = linha[15];
+                if (horarioInicio && horarioInicio !== "") {
+                  info.horarioInicio = horarioInicio;
+                }
+                break;
+              }
             }
           }
         }
       }
+    } catch (e) {
+      Logger.log("Erro ao buscar horário de início do PAINEL: " + e.message);
+      // Continuar sem o horário de início
     }
-  } catch (e) {
-    Logger.log("Erro ao buscar horário de início do PAINEL: " + e.message);
-    // Continuar sem o horário de início
-  }
 
-  return statusMaquinas;
+    return statusMaquinas;
+  } catch (error) {
+    Logger.log("ERRO CRÍTICO em buscarDadosTempoReal: " + error.message);
+    Logger.log("Stack: " + error.stack);
+    return {}; // Retornar objeto vazio em caso de erro
+  }
 }
 
 // === BUSCA PARADAS DETALHADAS DO TURNO ATUAL ===
