@@ -1,4 +1,23 @@
 // ==========================================================
+// CONFIGURAÇÃO GLOBAL
+// ==========================================================
+
+// ID DA PLANILHA
+const ID_PLANILHA = "1jApQbNfM7gUyIL9b3I0CuEFePlnr2DMKeuARCIjrq7g";
+
+// Função auxiliar para pegar a planilha correta (pelo ID ou ativa)
+function getSS() {
+  try {
+    if (ID_PLANILHA && ID_PLANILHA !== "") {
+      return SpreadsheetApp.openById(ID_PLANILHA);
+    }
+  } catch (e) {
+    console.error("Erro ao abrir pelo ID: " + e.message);
+  }
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+// ==========================================================
 // 1. ROTEADOR E LOGIN
 // ==========================================================
 
@@ -14,27 +33,40 @@ function doGet(e) {
 }
 
 function salvarDadosESP32(e) {
-  var maquina = e.parameter.maquina;
-  var evento = e.parameter.evento;
-  var duracao = e.parameter.duracao;
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Página1");
-  if (!sheet) sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  
-  var dataAtual = new Date();
-  var timezone = Session.getScriptTimeZone();
-  var dataStr = Utilities.formatDate(dataAtual, timezone, "dd/MM/yyyy");
-  var horaStr = Utilities.formatDate(dataAtual, timezone, "HH:mm:ss");
-  
-  sheet.appendRow([dataStr, horaStr, maquina, evento, duracao]);
+  // Trava de segurança para evitar conflito de escrita (Alta Escala)
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(10000); } catch (e) { return ContentService.createTextOutput("BUSY"); }
 
-  // Atualizar PAINEL automaticamente após receber dados do ESP32
-  gerarRelatorioTurnos();
-
-  return ContentService.createTextOutput("OK");
+  try {
+    var maquina = e.parameter.maquina;
+    var evento = e.parameter.evento;
+    var duracao = e.parameter.duracao;
+    
+    var ss = getSS();
+    var sheet = ss.getSheetByName("Página1");
+    if (!sheet) sheet = ss.getActiveSheet();
+    
+    var dataAtual = new Date();
+    var timezone = Session.getScriptTimeZone();
+    var dataStr = Utilities.formatDate(dataAtual, timezone, "dd/MM/yyyy");
+    var horaStr = Utilities.formatDate(dataAtual, timezone, "HH:mm:ss");
+    
+    sheet.appendRow([dataStr, horaStr, maquina, evento, duracao]);
+    
+    // O cálculo pesado (gerarRelatorioTurnos) foi removido daqui para não travar o ESP32.
+    // Ele deve rodar via TRIGGER (Acionador) a cada 1 minuto.
+    
+    return ContentService.createTextOutput("OK");
+    
+  } catch (error) {
+    return ContentService.createTextOutput("ERROR");
+  } finally {
+    lock.releaseLock(); 
+  }
 }
 
 function verificarLogin(usuario, senha) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSS();
   const sheet = ss.getSheetByName("LOGIN");
   if (!sheet) return { erro: "Aba LOGIN não encontrada." };
   
@@ -48,33 +80,25 @@ function verificarLogin(usuario, senha) {
 }
 
 // ==========================================================
-// 2. FUNÇÕES DE DADOS (LEITURA)
+// 2. FUNÇÕES DE DADOS (LEITURA TEMPO REAL)
 // ==========================================================
 
 function buscarDadosTempoReal() {
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheetDados = ss.getSheetByName("Página1");
-    if (!sheetDados) {
-      Logger.log("ERRO: Aba 'Página1' não encontrada");
-      return {};
-    }
+    var ss = getSS();
+    if (!ss) throw new Error("Não foi possível abrir a planilha.");
 
-    const dados = sheetDados.getDataRange().getValues();
-    if (!dados || dados.length <= 1) {
-      Logger.log("AVISO: Aba 'Página1' está vazia");
-      return {};
-    }
+    var sheetDados = ss.getSheetByName("Página1");
+    if (!sheetDados) throw new Error("Erro: Aba 'Página1' não encontrada");
 
-    const sheetTurnos = ss.getSheetByName("TURNOS");
-    if (!sheetTurnos) {
-      Logger.log("ERRO: Aba 'TURNOS' não encontrada");
-      return {};
-    }
+    var dados = sheetDados.getDataRange().getValues();
+    if (!dados || dados.length <= 1) return JSON.stringify({});
 
-    const dadosTurnos = sheetTurnos.getDataRange().getValues();
-    const configTurnos = {};
-    for (let i = 1; i < dadosTurnos.length; i++) {
+    var sheetTurnos = ss.getSheetByName("TURNOS");
+    var dadosTurnos = sheetTurnos ? sheetTurnos.getDataRange().getValues() : [];
+    var configTurnos = {};
+
+    for (var i = 1; i < dadosTurnos.length; i++) {
       if (dadosTurnos[i][0]) {
         configTurnos[String(dadosTurnos[i][0]).trim()] = [
            { nome: "Turno 1", inicio: dadosTurnos[i][1], fim: dadosTurnos[i][2] },
@@ -84,59 +108,58 @@ function buscarDadosTempoReal() {
       }
     }
 
-    const sheetDadosConfig = ss.getSheetByName("DADOS");
-    const mapaFamilias = {};
+    var sheetDadosConfig = ss.getSheetByName("DADOS");
+    var mapaFamilias = {};
+
     if (sheetDadosConfig) {
-      const dConfig = sheetDadosConfig.getDataRange().getValues();
+      var dConfig = sheetDadosConfig.getDataRange().getValues();
       if (dConfig.length > 0) {
-        const h = dConfig[0].map(c => String(c).toUpperCase().trim());
-        const idxM = h.indexOf("MÁQUINAS");
-        const idxF = h.findIndex(x => x.includes("FAMÍLIA") || x.includes("FAMILIA"));
+        var h = dConfig[0].map(function(c) { return String(c).toUpperCase().trim(); });
+        var idxM = h.indexOf("MÁQUINAS");
+        var idxF = h.findIndex(function(x) { return x.includes("FAMÍLIA") || x.includes("FAMILIA"); });
+
         if (idxM > -1 && idxF > -1) {
-          for (let i = 1; i < dConfig.length; i++) {
-            let m = String(dConfig[i][idxM]).trim();
+          for (var i = 1; i < dConfig.length; i++) {
+            var m = String(dConfig[i][idxM]).trim();
             mapaFamilias[m] = dConfig[i][idxF] || "GERAL";
           }
         }
       }
     }
 
-    const statusMaquinas = {};
-    const agora = new Date();
+    var statusMaquinas = {};
+    var agora = new Date();
+    var timezone = ss.getSpreadsheetTimeZone();
+    var sheetPainel = ss.getSheetByName("PAINEL");
+    var dadosPainel = sheetPainel ? sheetPainel.getDataRange().getValues() : [];
 
-    for (let i = dados.length - 1; i > 0; i--) {
-      let linha = dados[i];
-      let maquina = String(linha[2]).trim();
+    for (var i = dados.length - 1; i > 0; i--) {
+      var linha = dados[i];
+      var maquina = String(linha[2]).trim();
       if (!maquina) continue;
 
       if (!statusMaquinas[maquina]) {
-        let infoTurnoAtual = descobrirTurnoCompleto(agora, maquina, configTurnos);
-        let nomeTurnoAtual = "Fora de Turno";
-        let dataProducaoAtual = null;
+        var infoTurnoAtual = descobrirTurnoCompleto(agora, maquina, configTurnos);
+        var nomeTurnoAtual = infoTurnoAtual ? infoTurnoAtual.nome : "Fora de Turno";
+        var dataProducaoAtual = null;
 
         if (infoTurnoAtual) {
-          nomeTurnoAtual = infoTurnoAtual.nome;
           dataProducaoAtual = new Date(agora);
-
-          // REGRA: Dia de produção vai de 07:00 às 06:59 do dia seguinte
-          // Se estamos entre 00:00 e 06:59, pertence ao dia anterior
-          let horaAgora = agora.getHours();
+          var horaAgora = agora.getHours();
           if (horaAgora < 7) {
-            // Madrugada (00:00-06:59) = dia de produção começou ontem
             dataProducaoAtual.setDate(dataProducaoAtual.getDate() - 1);
           } else if (infoTurnoAtual.cruzaMeiaNoite && horaAgora < Math.floor(infoTurnoAtual.minInicio / 60)) {
-            // Turno individual que cruza meia-noite (ex: Turno 2: 16:49-01:40)
             dataProducaoAtual.setDate(dataProducaoAtual.getDate() - 1);
           }
-
           dataProducaoAtual.setHours(0,0,0,0);
         }
 
-        let dataReg = lerDataBR(linha[0]);
-        let timestampFinal;
-        let timePart = new Date(linha[1]);
+        var dataReg = lerDataBR(linha[0]);
+        var timestampFinal;
+        var timePart = new Date(linha[1]);
+
         if (!isNaN(dataReg.getTime()) && !isNaN(timePart.getTime())) {
-           let d = new Date(dataReg);
+           var d = new Date(dataReg);
            d.setHours(timePart.getHours(), timePart.getMinutes(), timePart.getSeconds(), 0);
            timestampFinal = d.getTime();
         } else {
@@ -151,38 +174,36 @@ function buscarDadosTempoReal() {
           totalProduzindo: 0,
           totalParada: 0,
           refNomeTurno: nomeTurnoAtual,
-          refDataProducao: dataProducaoAtual ? dataProducaoAtual.getTime() : null
+          refDataProducao: dataProducaoAtual ? dataProducaoAtual.getTime() : null,
+          horarioInicio: ""
         };
       }
-
-      let ref = statusMaquinas[maquina];
+      
+      var ref = statusMaquinas[maquina];
       if (ref.refNomeTurno !== "Fora de Turno" && ref.refDataProducao !== null) {
-        let dataReg = lerDataBR(linha[0]);
-        let horaRegObj = new Date(linha[1]);
+        var dataReg = lerDataBR(linha[0]);
+        var horaRegObj = new Date(linha[1]);
 
         if (!isNaN(dataReg.getTime()) && !isNaN(horaRegObj.getTime())) {
-          let fullDateReg = new Date(dataReg);
+          var fullDateReg = new Date(dataReg);
           fullDateReg.setHours(horaRegObj.getHours(), horaRegObj.getMinutes(), horaRegObj.getSeconds());
 
-          let infoTurnoReg = descobrirTurnoCompleto(fullDateReg, maquina, configTurnos);
+          var infoTurnoReg = descobrirTurnoCompleto(fullDateReg, maquina, configTurnos);
 
           if (infoTurnoReg && infoTurnoReg.nome === ref.refNomeTurno) {
-            let dataProdReg = new Date(dataReg);
-            let h = fullDateReg.getHours();
+            var dataProdReg = new Date(dataReg);
+            var h = fullDateReg.getHours();
 
-            // REGRA: Dia de produção vai de 07:00 às 06:59 do dia seguinte
             if (h < 7) {
-              // Madrugada (00:00-06:59) = dia de produção começou ontem
               dataProdReg.setDate(dataProdReg.getDate() - 1);
             } else if (infoTurnoReg.cruzaMeiaNoite && h < Math.floor(infoTurnoReg.minInicio / 60)) {
-              // Turno individual que cruza meia-noite
               dataProdReg.setDate(dataProdReg.getDate() - 1);
             }
 
             dataProdReg.setHours(0,0,0,0);
 
             if (dataProdReg.getTime() === ref.refDataProducao) {
-               let duracao = parseDuration(linha[4]);
+               var duracao = parseDuration(linha[4]);
                if (linha[3] === "TEMPO PRODUZINDO") ref.totalProduzindo += duracao;
                else if (linha[3] === "TEMPO PARADA") ref.totalParada += duracao;
             }
@@ -191,27 +212,21 @@ function buscarDadosTempoReal() {
       }
     }
 
-    // Buscar horário de início do PAINEL para cada máquina
-    try {
-      const sheetPainel = ss.getSheetByName("PAINEL");
-      if (sheetPainel) {
-        const dadosPainel = sheetPainel.getDataRange().getValues();
-        const timezone = ss.getSpreadsheetTimeZone();
-
-        for (let maq in statusMaquinas) {
-          const info = statusMaquinas[maq];
+    // Buscar horário de início do PAINEL
+    if (dadosPainel.length > 0) {
+       for (var maq in statusMaquinas) {
+          var info = statusMaquinas[maq];
           if (info.refNomeTurno !== "Fora de Turno" && info.refDataProducao !== null) {
-            const dataBusca = new Date(info.refDataProducao);
-            const dataBuscaStr = Utilities.formatDate(dataBusca, timezone, "dd/MM/yyyy");
+            var dataBusca = new Date(info.refDataProducao);
+            var dataBuscaStr = Utilities.formatDate(dataBusca, timezone, "dd/MM/yyyy");
 
-            // Procurar no PAINEL a linha correspondente
-            for (let i = 1; i < dadosPainel.length; i++) {
-              const linha = dadosPainel[i];
-              if (!linha || linha.length < 16) continue; // Proteção: verificar se a linha existe e tem todas as colunas
+            for (var i = 1; i < dadosPainel.length; i++) {
+              var linha = dadosPainel[i];
+              if (!linha || linha.length < 16) continue;
 
-              const maqPainel = String(linha[0] || "").trim();
-              const turnoPainel = String(linha[1] || "").trim();
-              let dataPainelStr = "";
+              var maqPainel = String(linha[0] || "").trim();
+              var turnoPainel = String(linha[1] || "").trim();
+              var dataPainelStr = "";
 
               if (linha[2] instanceof Date) {
                 dataPainelStr = Utilities.formatDate(linha[2], timezone, "dd/MM/yyyy");
@@ -220,34 +235,146 @@ function buscarDadosTempoReal() {
               }
 
               if (maqPainel === maq && turnoPainel === info.refNomeTurno && dataPainelStr === dataBuscaStr) {
-                // Coluna 15 (índice 15) tem o horário de início
-                const horarioInicio = linha[15];
+                var horarioInicio = linha[15];
                 if (horarioInicio && horarioInicio !== "") {
-                  info.horarioInicio = horarioInicio;
+                  if (horarioInicio instanceof Date) {
+                    info.horarioInicio = Utilities.formatDate(horarioInicio, timezone, "HH:mm:ss");
+                  } else {
+                    info.horarioInicio = String(horarioInicio);
+                  }
                 }
                 break;
               }
             }
           }
-        }
-      }
-    } catch (e) {
-      Logger.log("Erro ao buscar horário de início do PAINEL: " + e.message);
-      // Continuar sem o horário de início
+       }
     }
 
-    return statusMaquinas;
+    return JSON.stringify(statusMaquinas);
+
   } catch (error) {
-    Logger.log("ERRO CRÍTICO em buscarDadosTempoReal: " + error.message);
-    Logger.log("Stack: " + error.stack);
-    return {}; // Retornar objeto vazio em caso de erro
+    console.error("ERRO CRÍTICO: " + error.message);
+    return JSON.stringify({});
   }
 }
 
-// === BUSCA PARADAS DETALHADAS DO TURNO ATUAL ===
-// SIMPLIFICADO: Busca diretamente na aba "Pagina"
+// ==========================================================
+// 3. BUSCA DADOS PARA GRÁFICO POR TURNO (GRÁFICOS)
+// ==========================================================
+
+function buscarDadosGrafico(maquinaNome) {
+  const ss = getSS();
+  const sheet = ss.getSheetByName("Página1");
+  const sheetTurnos = ss.getSheetByName("TURNOS");
+  
+  if (!sheet || !sheetTurnos) return { erro: "Abas não encontradas" };
+
+  const dadosTurnosConfig = sheetTurnos.getDataRange().getValues();
+  let configTurnosMaq = [];
+  
+  for (let i = 1; i < dadosTurnosConfig.length; i++) {
+    if (String(dadosTurnosConfig[i][0]).trim() === maquinaNome) {
+       configTurnosMaq = [
+         { nome: "Turno 1", inicio: dadosTurnosConfig[i][1], fim: dadosTurnosConfig[i][2] },
+         { nome: "Turno 2", inicio: dadosTurnosConfig[i][3], fim: dadosTurnosConfig[i][4] },
+         { nome: "Turno 3", inicio: dadosTurnosConfig[i][5], fim: dadosTurnosConfig[i][6] }
+       ];
+       break;
+    }
+  }
+  
+  if (configTurnosMaq.length === 0) return { erro: "Turnos não configurados" };
+
+  const dados = sheet.getDataRange().getValues();
+  const hoje = new Date();
+  const dataLimite = new Date();
+  dataLimite.setDate(hoje.getDate() - 30);
+  dataLimite.setHours(0,0,0,0);
+
+  const timezone = ss.getSpreadsheetTimeZone();
+  const labels = [];
+  
+  const output = { "Turno 1": [], "Turno 2": [], "Turno 3": [] };
+  const mapIndices = {};
+
+  let idx = 0;
+  for (let d = new Date(dataLimite); d <= hoje; d.setDate(d.getDate() + 1)) {
+    let k = Utilities.formatDate(d, timezone, "dd/MM");
+    labels.push(k);
+    output["Turno 1"].push(0);
+    output["Turno 2"].push(0);
+    output["Turno 3"].push(0);
+    mapIndices[k] = idx++;
+  }
+
+  for (let i = 1; i < dados.length; i++) {
+    let nome = String(dados[i][2]).trim();
+    if (nome !== maquinaNome) continue;
+
+    let dataLinha = lerDataBR(dados[i][0]);
+    if (dataLinha < dataLimite) continue;
+
+    let evento = String(dados[i][3]).trim();
+    if (evento !== "TEMPO PRODUZINDO") continue;
+
+    let dataStr = Utilities.formatDate(dataLinha, timezone, "dd/MM");
+    let index = mapIndices[dataStr];
+    if (index === undefined) continue;
+
+    let hora = dados[i][1];
+    let duracao = parseDuration(dados[i][4]);
+
+    let turnoEncontrado = "Fora";
+    let min = 0;
+    if(hora instanceof Date) min = hora.getHours()*60 + hora.getMinutes();
+    else min = horaParaMinutos(hora);
+
+    for(let t of configTurnosMaq) {
+       let iT = horaParaMinutos(t.inicio);
+       let fT = horaParaMinutos(t.fim);
+       let cruza = iT > fT;
+       if (!cruza) { if (min >= iT && min < fT) turnoEncontrado = t.nome; }
+       else { if (min >= iT || min < fT) turnoEncontrado = t.nome; }
+    }
+
+    if (turnoEncontrado !== "Fora") {
+       let tInfo = configTurnosMaq.find(t => t.nome === turnoEncontrado);
+       if (tInfo) {
+         let iT = horaParaMinutos(tInfo.inicio);
+         let fT = horaParaMinutos(tInfo.fim);
+         if (iT > fT && min < fT) {
+             let dAnt = new Date(dataLinha);
+             dAnt.setDate(dAnt.getDate() - 1);
+             let kAnt = Utilities.formatDate(dAnt, timezone, "dd/MM");
+             index = mapIndices[kAnt];
+         }
+       }
+    }
+
+    if (output[turnoEncontrado] && index !== undefined) {
+      output[turnoEncontrado][index] += duracao;
+    }
+  }
+
+  ["Turno 1", "Turno 2", "Turno 3"].forEach(t => {
+    output[t] = output[t].map(s => parseFloat((s/3600).toFixed(2)));
+  });
+
+  return {
+    labels: labels,
+    t1: output["Turno 1"],
+    t2: output["Turno 2"],
+    t3: output["Turno 3"],
+    maquina: maquinaNome
+  };
+}
+
+// ==========================================================
+// 4. FUNÇÕES AUXILIARES E LISTAS
+// ==========================================================
+
 function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSS();
   const sheet = ss.getSheetByName("PAINEL");
 
   if (!sheet) {
@@ -258,23 +385,9 @@ function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
   const dados = sheet.getDataRange().getValues();
   const timezone = ss.getSpreadsheetTimeZone();
 
-  // Converter dataProducao para formato comparável
   const dataBusca = new Date(dataProducao);
   const dataBuscaStr = Utilities.formatDate(dataBusca, timezone, "dd/MM/yyyy");
 
-  Logger.log("=== buscarParadasTurnoAtual ===");
-  Logger.log("Máquina: " + maquina);
-  Logger.log("Turno: " + turnoNome);
-  Logger.log("Data: " + dataBuscaStr);
-
-  // Estrutura da aba "PAINEL":
-  // Col 0: MÁQUINAS | Col 1: TURNO | Col 2: DATA
-  // Col 3: LIGADA | Col 4: DESLIGADA
-  // Col 5: TEMPOS > 3 min ← APENAS ESTA COLUNA
-  // Col 6: TEMPOS > 10 min | Col 7: TEMPOS > 20 min | Col 8: TEMPOS > 30 min
-  // Col 9: CUSTO MÃO DE OBRA | Col 10: MOTIVO DA PARADA | ...
-
-  // Procurar a linha que corresponde
   for (let i = 1; i < dados.length; i++) {
     let linha = dados[i];
     let maqLinha = String(linha[0]).trim();
@@ -282,26 +395,18 @@ function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
     let dataLinha = lerDataBR(linha[2]);
     let dataLinhaStr = Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy");
 
-    // Verificar se é a linha correta (máquina + turno + data)
     if (maqLinha === maquina && turnoLinha === turnoNome && dataLinhaStr === dataBuscaStr) {
-      Logger.log("✓ Linha encontrada: " + (i + 1));
-
       const paradas = [];
-
-      // Processar APENAS a coluna "> 3 min" (col 5)
       const temposStr = String(linha[5] || "").trim();
 
       if (temposStr && temposStr !== "-" && temposStr !== "") {
-        Logger.log("> 3 min: " + temposStr);
-
-        // Separar por vírgula
         const tempos = temposStr.split(",");
-
         tempos.forEach(tempo => {
           tempo = tempo.trim();
-          if (tempo && tempo.includes(":")) {
-            // Parsear HH:MM:SS ou HH:MM
-            const partes = tempo.split(":");
+          let duracaoPura = tempo.split(" ")[0];
+          
+          if (duracaoPura && duracaoPura.includes(":")) {
+            const partes = duracaoPura.split(":");
             const h = parseInt(partes[0]) || 0;
             const m = parseInt(partes[1]) || 0;
             const s = partes.length > 2 ? (parseInt(partes[2]) || 0) : 0;
@@ -310,33 +415,26 @@ function buscarParadasTurnoAtual(maquina, turnoNome, dataProducao) {
             if (duracaoSeg > 0) {
               paradas.push({
                 duracao: duracaoSeg,
-                duracaoFmt: tempo
+                duracaoFmt: tempo 
               });
             }
           }
         });
       }
-
-      Logger.log("Total paradas > 3min: " + paradas.length);
       return paradas;
     }
   }
-
-  Logger.log("⚠ Nenhuma linha encontrada para: " + maquina + " | " + turnoNome + " | " + dataBuscaStr);
   return [];
 }
 
-// === BUSCA RELATÓRIO POR FAMÍLIA ===
 function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
+  const ss = getSS();
+  const sheet = ss.getSheetByName("PAINEL"); 
 
   if (!sheet) {
-    Logger.log("ERRO: Aba 'Pagina' não encontrada");
-    return { erro: "Aba 'Pagina' não encontrada" };
+    return { erro: "Aba 'PAINEL' não encontrada" };
   }
 
-  // Carregar mapeamento de máquinas -> famílias da aba DADOS
   const sheetDadosConfig = ss.getSheetByName("DADOS");
   const mapaFamilias = {};
   if (sheetDadosConfig) {
@@ -357,87 +455,43 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
   const dados = sheet.getDataRange().getValues();
   const timezone = ss.getSpreadsheetTimeZone();
 
-  Logger.log("=== buscarRelatorioFamilia ===");
-  Logger.log("Família: " + familia);
-  Logger.log("Período: " + dataInicio + " até " + dataFim);
-  Logger.log("Total linhas: " + dados.length);
-  Logger.log("Total máquinas no mapa: " + Object.keys(mapaFamilias).length);
-
-  // Estrutura da aba "Pagina" (16 colunas):
-  // Col 0: MÁQUINAS | Col 1: CUSTO MO | Col 2: TURNO | Col 3: DATA
-  // Col 4: LIGADA | Col 5: DESLIGADA
-  // Col 6: TEMPOS > 3 min | Col 7: TEMPOS > 10 min
-  // Col 8: TEMPOS > 20 min | Col 9: TEMPOS > 30 min
-  // Col 10: MOTIVO | Col 11: MOTIVO(dup) | Col 12: SERVIÇOS
-  // Col 13: PEÇAS | Col 14: CUSTO PEÇAS | Col 15: DATA FAB
-
   const maquinasPorFamilia = {};
   let totalRodandoSeg = 0;
   let totalParadoSeg = 0;
   let totalParadasCriticas = 0;
 
-  // Percorrer dados da aba Pagina
   for (let i = 1; i < dados.length; i++) {
     const linha = dados[i];
     const nomeMaquina = String(linha[0]).trim();
-
-    // Verificar se pertence à família usando o mapeamento da aba DADOS
     const familiaMaquina = mapaFamilias[nomeMaquina] || "";
+    
     if (familiaMaquina.toUpperCase() !== familia.toUpperCase()) {
       continue;
     }
 
-    const turno = String(linha[2]).trim(); // Col 2: TURNO
-    const dataLinha = lerDataBR(linha[3]); // Col 3: DATA
+    const turno = String(linha[1]).trim();
+    const dataLinha = lerDataBR(linha[2]);
     const dataLinhaStr = Utilities.formatDate(dataLinha, timezone, "yyyy-MM-dd");
 
-    Logger.log(`Linha ${i}: ${nomeMaquina} (fam: ${familiaMaquina}) | ${turno} | ${dataLinhaStr}`);
+    if (dataInicio && dataLinhaStr < dataInicio) continue;
+    if (dataFim && dataLinhaStr > dataFim) continue;
 
-    // Filtrar por data
-    if (dataInicio && dataLinhaStr < dataInicio) {
-      Logger.log(`  ⊗ Rejeitada (antes de ${dataInicio})`);
-      continue;
-    }
-    if (dataFim && dataLinhaStr > dataFim) {
-      Logger.log(`  ⊗ Rejeitada (depois de ${dataFim})`);
-      continue;
-    }
+    const ligada = linha[3];
+    const desligada = linha[4];
+    const paradasCriticas = String(linha[5] || "").trim();
 
-    Logger.log("  ✓ Aceita");
+    let ligadaSeg = converterParaSegundos(ligada);
+    let desligadaSeg = converterParaSegundos(desligada);
 
-    // Extrair dados
-    const ligada = linha[4]; // Col 4: LIGADA
-    const desligada = linha[5]; // Col 5: DESLIGADA
-    const paradasCriticas = String(linha[6] || "").trim(); // Col 6: TEMPOS > 3 min
-
-    // Converter para segundos (pode ser Date object ou número)
-    let ligadaSeg = 0;
-    let desligadaSeg = 0;
-
-    if (ligada instanceof Date) {
-      ligadaSeg = ligada.getHours() * 3600 + ligada.getMinutes() * 60 + ligada.getSeconds();
-    } else if (typeof ligada === 'number') {
-      ligadaSeg = Math.round(ligada * 86400);
-    }
-
-    if (desligada instanceof Date) {
-      desligadaSeg = desligada.getHours() * 3600 + desligada.getMinutes() * 60 + desligada.getSeconds();
-    } else if (typeof desligada === 'number') {
-      desligadaSeg = Math.round(desligada * 86400);
-    }
-
-    // Contar paradas críticas (separadas por vírgula)
     let qtdParadas = 0;
     if (paradasCriticas && paradasCriticas !== "-") {
       qtdParadas = paradasCriticas.split(",").filter(p => p.trim().length > 0).length;
     }
 
-    // Acumular totais
     totalRodandoSeg += ligadaSeg;
     totalParadoSeg += desligadaSeg;
     totalParadasCriticas += qtdParadas;
 
-    // Agrupar por máquina
     if (!maquinasPorFamilia[nomeMaquina]) {
       maquinasPorFamilia[nomeMaquina] = [];
     }
@@ -447,20 +501,13 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
       turno: turno,
       ligada: formatarHoraExcel(ligada),
       desligada: formatarHoraExcel(desligada),
-      paradas3min: formatarCelulaParada(linha[6]),
-      paradas10min: formatarCelulaParada(linha[7]),
-      paradas20min: formatarCelulaParada(linha[8]),
-      paradas30min: formatarCelulaParada(linha[9]),
-      motivo: String(linha[10] || linha[11] || "-"),
-      servico: String(linha[12] || "-"),
-      pecas: String(linha[13] || "-"),
-      custoMO: typeof linha[1] === 'number' ? linha[1] : 0,
-      custoPecas: typeof linha[14] === 'number' ? linha[14] : 0,
-      obs: String(linha[15] || "-")
+      paradas3min: formatarCelulaParada(linha[5]), 
+      paradas10min: formatarCelulaParada(linha[6]),
+      paradas20min: formatarCelulaParada(linha[7]), 
+      paradas30min: formatarCelulaParada(linha[8])
     });
   }
 
-  // Montar resultado
   const maquinas = [];
   for (let nomeMaq in maquinasPorFamilia) {
     maquinas.push({
@@ -469,19 +516,7 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
     });
   }
 
-  // Ordenar máquinas por nome
   maquinas.sort((a, b) => a.nome.localeCompare(b.nome));
-
-  Logger.log("Total máquinas encontradas: " + maquinas.length);
-  Logger.log("Total paradas críticas: " + totalParadasCriticas);
-
-  // Debug: mostrar famílias disponíveis se não encontrou nada
-  if (maquinas.length === 0) {
-    const familiasUnicas = [...new Set(Object.values(mapaFamilias))];
-    Logger.log("⚠️ NENHUMA MÁQUINA ENCONTRADA!");
-    Logger.log("Famílias disponíveis no mapa: " + familiasUnicas.join(", "));
-    Logger.log("Família buscada: '" + familia + "'");
-  }
 
   return {
     familia: familia,
@@ -496,28 +531,12 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
   };
 }
 
-function formatarSegundosParaHora(segundos) {
-  if (typeof segundos !== 'number' || isNaN(segundos)) return "00:00:00";
-  segundos = Math.round(segundos);
-  const h = Math.floor(segundos/3600).toString().padStart(2,'0');
-  const m = Math.floor((segundos%3600)/60).toString().padStart(2,'0');
-  const sec = (segundos%60).toString().padStart(2,'0');
-  return `${h}:${m}:${sec}`;
-}
-
-// === BUSCA HISTÓRICO SIMPLIFICADO ===
-// Busca na aba "Pagina": máquina + filtro de data (opcional)
 function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
-
-  Logger.log("=== buscarHistorico ===");
-  Logger.log("Máquina: " + maquinaFiltro);
-  Logger.log("Data Início: " + dataInicio);
-  Logger.log("Data Fim: " + dataFim);
+  const ss = getSS();
+  const sheet = ss.getSheetByName("PAINEL");
 
   if (!sheet) {
-    Logger.log("⚠ Aba 'Pagina' não encontrada");
+    Logger.log("⚠ Aba 'PAINEL' não encontrada");
     return [];
   }
 
@@ -525,109 +544,75 @@ function buscarHistorico(maquinaFiltro, dataInicio, dataFim) {
   const timezone = ss.getSpreadsheetTimeZone();
   const resultados = [];
 
-  Logger.log("Total linhas: " + dados.length);
-
-  // Estrutura da aba "Pagina" (16 colunas):
-  // Col 0: MÁQUINAS | Col 1: CUSTO MO | Col 2: TURNO | Col 3: DATA
-  // Col 4: LIGADA | Col 5: DESLIGADA
-  // Col 6: TEMPOS > 3 min | Col 7: TEMPOS > 10 min
-  // Col 8: TEMPOS > 20 min | Col 9: TEMPOS > 30 min
-  // Col 10: MOTIVO | Col 11: MOTIVO(dup) | Col 12: SERVIÇOS
-  // Col 13: PEÇAS | Col 14: CUSTO PEÇAS | Col 15: DATA FAB
-
-  // Percorrer todas as linhas
   for (let i = 1; i < dados.length; i++) {
     let linha = dados[i];
     let maqLinha = String(linha[0]).trim();
 
-    // Filtro 1: Máquina
     if (maqLinha !== maquinaFiltro) continue;
 
-    // Filtro 2: Data (se fornecido)
-    let dataLinha = lerDataBR(linha[3]);
+    let dataLinha = lerDataBR(linha[2]);
     let dataLinhaStr = Utilities.formatDate(dataLinha, timezone, "yyyy-MM-dd");
 
-    Logger.log("Linha " + i + " - Máq: " + maqLinha + " | Data: " + dataLinhaStr + " | Filtro: " + dataInicio + " a " + dataFim);
+    if (dataInicio && dataLinhaStr < dataInicio) continue;
+    if (dataFim && dataLinhaStr > dataFim) continue;
 
-    if (dataInicio && dataLinhaStr < dataInicio) {
-      Logger.log("  ⊗ Rejeitada (antes do início)");
-      continue;
-    }
-    if (dataFim && dataLinhaStr > dataFim) {
-      Logger.log("  ⊗ Rejeitada (depois do fim)");
-      continue;
-    }
-
-    Logger.log("  ✓ Aceita");
-
-    // Passou nos filtros - adicionar ao resultado
     try {
-      // Debug: ver valores brutos das colunas de tempo
-      if (i === 1) { // Apenas primeira linha para não encher os logs
-        Logger.log("  DEBUG Col 4 (LIGADA): " + linha[4] + " (tipo: " + typeof linha[4] + ")");
-        Logger.log("  DEBUG Col 5 (DESLIGADA): " + linha[5] + " (tipo: " + typeof linha[5] + ")");
-        Logger.log("  DEBUG Col 6 (PARADAS >3): " + linha[6] + " (tipo: " + typeof linha[6] + ")");
-      }
-
       const registro = {
-        turno: String(linha[2] || "-"),
+        turno: String(linha[1] || "-"),
         data: Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy"),
-        ligada: formatarHoraExcel(linha[4]),
-        desligada: formatarHoraExcel(linha[5]),
-        paradas3min: formatarCelulaParada(linha[6]),
-        paradas10min: formatarCelulaParada(linha[7]),
-        paradas20min: formatarCelulaParada(linha[8]),
-        paradas30min: formatarCelulaParada(linha[9]),
-        motivo: String(linha[10] || linha[11] || "-"),
-        servico: String(linha[12] || "-"),
-        pecas: String(linha[13] || "-"),
-        custoMO: typeof linha[1] === 'number' ? linha[1] : 0,
-        custoPecas: typeof linha[14] === 'number' ? linha[14] : 0,
-        obs: String(linha[15] || "-")
+        ligada: formatarHoraExcel(linha[3]),
+        desligada: formatarHoraExcel(linha[4]),
+        paradas3min: formatarCelulaParada(linha[5]),
+        paradas10min: formatarCelulaParada(linha[6]),
+        paradas20min: formatarCelulaParada(linha[7]),
+        paradas30min: formatarCelulaParada(linha[8]),
+        motivo: String(linha[10] || "-"),
+        servico: String(linha[11] || "-"),
+        pecas: String(linha[12] || "-"),
+        custoMO: typeof linha[9] === 'number' ? linha[9] : 0,
+        custoPecas: typeof linha[13] === 'number' ? linha[13] : 0,
+        obs: String(linha[14] || "-")
       };
-
-      if (i === 1) {
-        Logger.log("  DEBUG Após formatação:");
-        Logger.log("    ligada: " + registro.ligada);
-        Logger.log("    desligada: " + registro.desligada);
-        Logger.log("    paradas3min: " + registro.paradas3min);
-      }
-
       resultados.push(registro);
-      Logger.log("  → Registro adicionado: " + registro.data + " | " + registro.turno);
     } catch (erro) {
-      Logger.log("  ⚠ ERRO ao processar linha " + i + ": " + erro.message);
+      Logger.log(" ⚠ ERRO ao processar linha " + i + ": " + erro.message);
     }
   }
 
-  Logger.log("Registros encontrados: " + resultados.length);
-  Logger.log("Retornando array com " + resultados.length + " elementos");
   return resultados;
 }
 
 function buscarListasDropdown() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSS();
   const sheet = ss.getSheetByName("DADOS");
-  if (!sheet) return { motivos: [], servicos: [] };
+  if (!sheet) return { motivos: [], servicos: [], familias: [] };
+  
   const dados = sheet.getDataRange().getValues();
-  let motivos = [], servicos = [];
-  let colMotivo = -1, colServico = -1;
+  let motivos = [], servicos = [], familias = [];
+  
   if (dados.length > 0) {
     for (let c = 0; c < dados[0].length; c++) {
       let head = String(dados[0][c]).toUpperCase().trim();
-      if (head === "MOTIVO DA PARADA") colMotivo = c;
-      if (head === "SERVIÇOS REALIZADOS") colServico = c; 
+      
+      if (head === "MOTIVO DA PARADA") {
+         for(let i=1; i<dados.length; i++) if(dados[i][c]) motivos.push(dados[i][c]);
+      }
+      if (head === "SERVIÇOS REALIZADOS") {
+         for(let i=1; i<dados.length; i++) if(dados[i][c]) servicos.push(dados[i][c]);
+      }
+      if (head.includes("FAMÍLIA") || head.includes("FAMILIA")) {
+         for(let i=1; i<dados.length; i++) {
+             let f = String(dados[i][c]).trim();
+             if(f && !familias.includes(f)) familias.push(f);
+         }
+      }
     }
   }
-  for (let i = 1; i < dados.length; i++) {
-    if (colMotivo > -1 && dados[i][colMotivo]) motivos.push(dados[i][colMotivo]);
-    if (colServico > -1 && dados[i][colServico]) servicos.push(dados[i][colServico]);
-  }
-  return { motivos: motivos, servicos: servicos };
+  return { motivos: motivos, servicos: servicos, familias: familias.sort() };
 }
 
 function salvarApontamento(dadosForm) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSS();
   const sheet = ss.getSheetByName("PAINEL") || ss.getSheetByName("Painel");
   const dados = sheet.getDataRange().getValues();
   let linhaEncontrada = -1;
@@ -664,11 +649,11 @@ function salvarApontamento(dadosForm) {
 }
 
 // ==========================================================
-// 3. GERADOR DE RELATÓRIO
+// 5. GERADOR DE RELATÓRIO
 // ==========================================================
 
 function gerarRelatorioTurnos() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSS();
   const sheetDados = ss.getSheetByName("Página1");
   const sheetTurnos = ss.getSheetByName("TURNOS");
   const sheetPainel = ss.getSheetByName("PAINEL");
@@ -678,6 +663,7 @@ function gerarRelatorioTurnos() {
   const dadosPainelAntigo = sheetPainel.getDataRange().getValues();
   const mapaPainelExistente = {}; 
   const agora = new Date();
+  const dataHojeStr = Utilities.formatDate(agora, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy");
   
   const dadosTurnos = sheetTurnos.getDataRange().getValues();
   const configTurnos = {}; 
@@ -702,31 +688,9 @@ function gerarRelatorioTurnos() {
     }
   }
   
-  const mapaCustos = {};
-  if (sheetCustos) {
-    const dadosCustos = sheetCustos.getDataRange().getValues();
-    if (dadosCustos.length > 0) {
-      const header = dadosCustos[0].map(c => String(c).toUpperCase().trim());
-      const idxM = header.indexOf("MÁQUINAS");
-      const idxC = header.indexOf("MÃO DE OBRA");
-      if (idxM > -1 && idxC > -1) {
-        for (let i = 1; i < dadosCustos.length; i++) {
-          let m = String(dadosCustos[i][idxM]).trim();
-          let c = dadosCustos[i][idxC];
-          if (typeof c === 'string') c = parseFloat(c.replace(/[^\d,.-]/g, '').replace(',', '.')) || 0;
-          if (m) mapaCustos[m] = c;
-        }
-      }
-    }
-  }
-  
   const dadosBrutos = sheetDados.getDataRange().getValues();
   const resumo = {};
-
-  Logger.log("=== PROCESSANDO PÁGINA1 ===");
-  Logger.log("Total de linhas: " + (dadosBrutos.length - 1));
-
-  let contadores = { total: 0, processadas: 0, ignoradas: 0, semTurno: 0 };
+  const mapUltimoFim = {};
 
   for (let i = 1; i < dadosBrutos.length; i++) {
     let linha = dadosBrutos[i];
@@ -737,62 +701,117 @@ function gerarRelatorioTurnos() {
     let duracaoRaw = linha[4];
     let duracao = parseDuration(duracaoRaw);
 
-    contadores.total++;
-
-    if (!maquinaRaw || !hora) {
-      contadores.ignoradas++;
-      continue;
-    }
+    if (!maquinaRaw || !hora) continue;
 
     let maquina = String(maquinaRaw).trim();
     let nomeEvento = evento ? String(evento).trim() : "";
 
-    if (nomeEvento !== "TEMPO PRODUZINDO" && nomeEvento !== "TEMPO PARADA") {
-      contadores.ignoradas++;
-      Logger.log(`Linha ${i+1}: Evento ignorado "${nomeEvento}"`);
-      continue;
-    }
+    if (nomeEvento !== "TEMPO PRODUZINDO" && nomeEvento !== "TEMPO PARADA") continue;
 
     let infoTurno = descobrirTurnoCompleto(hora, maquina, configTurnos);
     if (infoTurno) {
       let dataFim = new Date(dataOriginal);
       if (isNaN(dataFim.getTime())) dataFim = new Date();
       let horaObj = new Date(hora);
-      if (!isNaN(horaObj.getTime())) { dataFim.setHours(horaObj.getHours(), horaObj.getMinutes(), horaObj.getSeconds(), 0); }
+      if (!isNaN(horaObj.getTime())) { 
+        dataFim.setHours(horaObj.getHours(), horaObj.getMinutes(), horaObj.getSeconds(), 0); 
+      }
+      
       let dataProducao = new Date(dataFim);
       let horaReg = dataFim.getHours();
 
-      // REGRA: Dia de produção vai de 07:00 às 06:59 do dia seguinte
       if (horaReg < 7) {
-        // Madrugada (00:00-06:59) = dia de produção começou ontem
         dataProducao.setDate(dataProducao.getDate() - 1);
       } else if (infoTurno.cruzaMeiaNoite && horaReg < Math.floor(infoTurno.minInicio / 60)) {
-        // Turno individual que cruza meia-noite
         dataProducao.setDate(dataProducao.getDate() - 1);
       }
-
-      // Log detalhado para eventos TEMPO PARADA
-      if (nomeEvento === "TEMPO PARADA" && duracao > 180) {
-        Logger.log(`Linha ${i+1}: ${maquina} | ${nomeEvento} | Raw: ${duracaoRaw} | Segundos: ${duracao} | Turno: ${infoTurno.nome}`);
+      
+      // CLAMPING
+      if (configTurnos[maquina]) {
+        let turnoConfig = configTurnos[maquina].find(t => t.nome === infoTurno.nome);
+        if (turnoConfig && turnoConfig.inicio) {
+           let horaInicioConfig = new Date(turnoConfig.inicio);
+           let dataInicioTurnoAbsoluto = new Date(dataProducao);
+           dataInicioTurnoAbsoluto.setHours(horaInicioConfig.getHours(), horaInicioConfig.getMinutes(), 0, 0);
+           
+           let inicioRealEvento = new Date(dataFim.getTime() - (duracao * 1000));
+           
+           if (inicioRealEvento.getTime() < dataInicioTurnoAbsoluto.getTime()) {
+              let novaDuracao = Math.floor((dataFim.getTime() - dataInicioTurnoAbsoluto.getTime()) / 1000);
+              if (novaDuracao < 0) novaDuracao = 0; 
+              duracao = novaDuracao;
+           }
+        }
       }
 
-      processarRegistro(resumo, ss, maquina, dataProducao, infoTurno.nome, nomeEvento, duracao, hora);
-      contadores.processadas++;
-    } else {
-      contadores.semTurno++;
-      Logger.log(`Linha ${i+1}: Sem turno - ${maquina} às ${hora}`);
+      let dProdStr = Utilities.formatDate(dataProducao, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy");
+      let chaveGap = maquina + "|" + dProdStr + "|" + infoTurno.nome;
+
+      if (mapUltimoFim[chaveGap]) {
+        let ultimoFim = mapUltimoFim[chaveGap]; 
+        let inicioEventoAtual = new Date(dataFim.getTime() - (duracao * 1000));
+        let gapIntermediario = Math.floor((inicioEventoAtual.getTime() - ultimoFim.getTime()) / 1000);
+        
+        if (gapIntermediario > 60) {
+           registrarGapIntermediario(resumo, ss, maquina, dataProducao, infoTurno.nome, gapIntermediario, ultimoFim);
+        }
+      }
+      mapUltimoFim[chaveGap] = dataFim;
+
+      processarRegistro(resumo, ss, maquina, dataProducao, infoTurno.nome, nomeEvento, duracao, dataFim);
     }
   }
 
-  Logger.log("=== RESUMO PROCESSAMENTO ===");
-  Logger.log(`Total: ${contadores.total} | Processadas: ${contadores.processadas} | Ignoradas: ${contadores.ignoradas} | Sem turno: ${contadores.semTurno}`);
+  const agoraTimestamp = agora.getTime();
 
-  // Log do resumo acumulado
-  Logger.log("=== RESUMO PARADAS ACUMULADAS ===");
   for (let chave in resumo) {
     let item = resumo[chave];
-    if (item.listaStop3 && item.listaStop3.length > 0) {
-      Logger.log(`${chave}: ${item.listaStop3.length} paradas >3min | ${item.listaStop10.length} >10min | ${item.listaStop20.length} >20min | ${item.listaStop30.length} >30min`);
+    
+    try {
+      if (item.ultimaHora) {
+        let configMaq = configTurnos[item.maquina];
+        if (configMaq) {
+          let turnoConfig = configMaq.find(t => t.nome === item.turno);
+          if (turnoConfig && turnoConfig.fim) {
+            let dataFimTurno = new Date(item.data);
+            let horaFimConfig = new Date(turnoConfig.fim);
+            let horaInicioConfig = new Date(turnoConfig.inicio);
+            
+            let minI = horaInicioConfig.getHours() * 60 + horaInicioConfig.getMinutes();
+            let minF = horaFimConfig.getHours() * 60 + horaFimConfig.getMinutes();
+            
+            if (minI > minF) {
+               dataFimTurno.setDate(dataFimTurno.getDate() + 1);
+            }
+            
+            dataFimTurno.setHours(horaFimConfig.getHours(), horaFimConfig.getMinutes(), 0, 0);
+            
+            if (agoraTimestamp > dataFimTurno.getTime()) {
+               let ultimaHoraReg = new Date(item.ultimaHora);
+               
+               if (!isNaN(ultimaHoraReg.getTime())) {
+                 let gapFinalSegundos = Math.floor((dataFimTurno.getTime() - ultimaHoraReg.getTime()) / 1000);
+                 
+                 if (gapFinalSegundos > 60) {
+                    item.desligada += gapFinalSegundos;
+                    
+                    let hIni = Utilities.formatDate(ultimaHoraReg, ss.getSpreadsheetTimeZone(), "HH:mm");
+                    let hFim = Utilities.formatDate(dataFimTurno, ss.getSpreadsheetTimeZone(), "HH:mm");
+                    
+                    let objGap = { s: gapFinalSegundos, h: hIni, f: hFim };
+
+                    if (gapFinalSegundos > 180) item.listaStop3.push(objGap);
+                    if (gapFinalSegundos > 600) item.listaStop10.push(objGap);
+                    if (gapFinalSegundos > 1200) item.listaStop20.push(objGap);
+                    if (gapFinalSegundos > 1800) item.listaStop30.push(objGap);
+                 }
+               }
+            }
+          }
+        }
+      }
+    } catch(e) {
+      Logger.log("Erro no pós-processamento de fim de turno: " + e.message);
     }
   }
 
@@ -803,47 +822,34 @@ function gerarRelatorioTurnos() {
     let item = resumo[chave];
     let rowFinal = [];
 
-    // CALCULAR TEMPO DE PARADA INICIAL (do início do turno até começar a rodar)
     try {
-      if (item.horarioInicio) {
+      if (item.primeiraHora) {
         let configMaq = configTurnos[item.maquina];
         if (configMaq) {
-          // Encontrar o turno específico (Turno 1, 2 ou 3)
           let turnoConfig = configMaq.find(t => t.nome === item.turno);
           if (turnoConfig && turnoConfig.inicio) {
-            // Criar data/hora do início do turno
             let dataInicioTurno = new Date(item.data);
             let horaInicioTurno = new Date(turnoConfig.inicio);
             if (!isNaN(horaInicioTurno.getTime()) && !isNaN(dataInicioTurno.getTime())) {
               dataInicioTurno.setHours(horaInicioTurno.getHours(), horaInicioTurno.getMinutes(), horaInicioTurno.getSeconds(), 0);
 
-              // Criar data/hora de quando a máquina começou a rodar
-              let horaMaquinaInicio = new Date(item.horarioInicio);
+              let horaPrimeiroRegistro = new Date(item.primeiraHora);
 
-              // Calcular diferença em segundos
-              if (!isNaN(horaMaquinaInicio.getTime())) {
-                let diferencaSegundos = Math.floor((horaMaquinaInicio.getTime() - dataInicioTurno.getTime()) / 1000);
+              if (!isNaN(horaPrimeiroRegistro.getTime())) {
+                let inicioEfetivoEvento = new Date(horaPrimeiroRegistro.getTime() - (item.primeiraDuracao * 1000));
+                let diferencaSegundos = Math.floor((inicioEfetivoEvento.getTime() - dataInicioTurno.getTime()) / 1000);
 
-                // Se a diferença for positiva e significativa (>= 60 segundos = 1 min)
                 if (diferencaSegundos >= 60) {
-                  Logger.log(`${item.maquina} ${item.turno}: Parada inicial de ${diferencaSegundos}s (${Math.floor(diferencaSegundos/60)}min)`);
-
-                  // Adicionar ao tempo total de parada
                   item.desligada += diferencaSegundos;
+                  let hIni = Utilities.formatDate(dataInicioTurno, ss.getSpreadsheetTimeZone(), "HH:mm");
+                  let hFim = Utilities.formatDate(inicioEfetivoEvento, ss.getSpreadsheetTimeZone(), "HH:mm");
+                  
+                  let objGap = { s: diferencaSegundos, h: hIni, f: hFim };
 
-                  // Adicionar nas listas de paradas conforme os thresholds
-                  if (diferencaSegundos > 180) {  // > 3 min
-                    item.listaStop3.unshift(diferencaSegundos);  // unshift = adiciona no início
-                  }
-                  if (diferencaSegundos > 600) {  // > 10 min
-                    item.listaStop10.unshift(diferencaSegundos);
-                  }
-                  if (diferencaSegundos > 1200) {  // > 20 min
-                    item.listaStop20.unshift(diferencaSegundos);
-                  }
-                  if (diferencaSegundos > 1800) {  // > 30 min
-                    item.listaStop30.unshift(diferencaSegundos);
-                  }
+                  if (diferencaSegundos > 180) item.listaStop3.unshift(objGap);
+                  if (diferencaSegundos > 600) item.listaStop10.unshift(objGap);
+                  if (diferencaSegundos > 1200) item.listaStop20.unshift(objGap);
+                  if (diferencaSegundos > 1800) item.listaStop30.unshift(objGap);
                 }
               }
             }
@@ -852,50 +858,27 @@ function gerarRelatorioTurnos() {
       }
     } catch (e) {
       Logger.log(`Erro ao calcular parada inicial para ${item.maquina} ${item.turno}: ${e.message}`);
-      // Continuar sem adicionar a parada inicial
     }
 
-    let infoTurnoAgora = descobrirTurnoCompleto(agora, item.maquina, configTurnos);
-    let ehTurnoAtual = false;
-    
-    if (infoTurnoAgora && infoTurnoAgora.nome === item.turno) {
-      let dataProdAgora = new Date(agora);
-      let h = agora.getHours();
+    let itemDataStr = Utilities.formatDate(new Date(item.data), ss.getSpreadsheetTimeZone(), "dd/MM/yyyy");
+    let ehDeHoje = (itemDataStr === dataHojeStr);
 
-      // REGRA: Dia de produção vai de 07:00 às 06:59 do dia seguinte
-      if (h < 7) {
-        // Madrugada (00:00-06:59) = dia de produção começou ontem
-        dataProdAgora.setDate(dataProdAgora.getDate() - 1);
-      } else if (infoTurnoAgora.cruzaMeiaNoite && h < Math.floor(infoTurnoAgora.minInicio / 60)) {
-        // Turno individual que cruza meia-noite
-        dataProdAgora.setDate(dataProdAgora.getDate() - 1);
-      }
-
-      dataProdAgora.setHours(0,0,0,0);
-      let dataItem = new Date(item.data);
-      dataItem.setHours(0,0,0,0);
-      if (dataItem.getTime() === dataProdAgora.getTime()) {
-        ehTurnoAtual = true;
-      }
-    }
-
-    if (mapaPainelExistente[chave] && !ehTurnoAtual) {
+    if (mapaPainelExistente[chave] && !ehDeHoje) {
        rowFinal = mapaPainelExistente[chave];
     } else {
        let manual = { motivo: "", servico: "", pecas: "", custoPecas: "", obs: "" };
        let horarioInicioAnterior = "";
        if (mapaPainelExistente[chave]) {
-          let old = mapaPainelExistente[chave];
-          manual = { motivo: old[10], servico: old[11], pecas: old[12], custoPecas: old[13], obs: old[14] };
-          horarioInicioAnterior = old[15] || "";
+         let old = mapaPainelExistente[chave];
+         manual = { motivo: old[10], servico: old[11], pecas: old[12], custoPecas: old[13], obs: old[14] };
+         horarioInicioAnterior = old[15] || "";
        }
 
        let tempoParadoLiq = Math.max(0, item.desligada - 3600);
-       let custoMO = (tempoParadoLiq / 3600) * (mapaCustos[item.maquina] || 0);
+       let custoMO = 0; 
        let valLigada = Math.max(0, item.ligada) / SEGUNDOS_DIA;
        let valDesligada = Math.max(0, item.desligada) / SEGUNDOS_DIA;
 
-       // Formatar horário de início
        let horarioInicioStr = horarioInicioAnterior;
        if (item.horarioInicio) {
          let horaObj = new Date(item.horarioInicio);
@@ -903,6 +886,11 @@ function gerarRelatorioTurnos() {
            horarioInicioStr = Utilities.formatDate(horaObj, ss.getSpreadsheetTimeZone(), "HH:mm:ss");
          }
        }
+
+       if(item.listaStop3.length > 0) item.listaStop3.sort((a,b) => b.s - a.s);
+       if(item.listaStop10.length > 0) item.listaStop10.sort((a,b) => b.s - a.s);
+       if(item.listaStop20.length > 0) item.listaStop20.sort((a,b) => b.s - a.s);
+       if(item.listaStop30.length > 0) item.listaStop30.sort((a,b) => b.s - a.s);
 
        rowFinal = [
           item.maquina, item.turno, item.data, valLigada, valDesligada,
@@ -944,12 +932,12 @@ function gerarRelatorioTurnos() {
 
 // 4. LIMPEZA
 function limparDadosAntigos() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSS();
   const sheet = ss.getSheetByName("Página1");
   if (!sheet) return;
   const dados = sheet.getDataRange().getValues();
   const hoje = new Date();
-  const limite = new Date(hoje.getTime() - (15 * 24 * 60 * 60 * 1000));
+  const limite = new Date(hoje.getTime() - (45 * 24 * 60 * 60 * 1000));
   limite.setHours(0,0,0,0);
   let linhasParaDeletar = 0;
   for (let i = 0; i < dados.length; i++) {
@@ -962,34 +950,15 @@ function limparDadosAntigos() {
 // === AUXILIARES ===
 function lerDataBR(valor) {
   if (!valor) return new Date();
-
-  // Se já é um objeto Date válido, retornar diretamente
-  if (valor instanceof Date && !isNaN(valor.getTime())) {
-    return new Date(valor);
-  }
-
-  // Se é string, tentar parsear
-  if (typeof valor === 'string') {
-    let partes = valor.split('/');
-    if (partes.length === 3) {
-      // Formato dd/MM/yyyy
-      return new Date(parseInt(partes[2]), parseInt(partes[1])-1, parseInt(partes[0]));
-    }
-    partes = valor.split('-');
-    if (partes.length === 3) {
-      // Formato yyyy-MM-dd
-      return new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
-    }
-  }
-
-  // Fallback: tentar converter diretamente
+  if (valor instanceof Date) return valor;
   try {
-    const d = new Date(valor);
-    if (!isNaN(d.getTime())) return d;
-  } catch (e) {
-    // Ignorar erro
-  }
-
+    if (typeof valor === 'string') {
+      let partes = valor.split('/');
+      if (partes.length === 3) return new Date(parseInt(partes[2]), parseInt(partes[1])-1, parseInt(partes[0]));
+      partes = valor.split('-');
+      if (partes.length === 3) return new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
+    }
+  } catch (e) {}
   return new Date();
 }
 function parseDuration(raw) {
@@ -997,18 +966,11 @@ function parseDuration(raw) {
   if (raw instanceof Date) return raw.getHours() * 3600 + raw.getMinutes() * 60 + raw.getSeconds();
   if (typeof raw === 'string') {
     let str = raw.trim();
-    // Se está no formato HH:MM:SS ou MM:SS
     if (str.includes(':')) {
       let partes = str.split(':');
-      if (partes.length === 3) {
-        // HH:MM:SS
-        return parseInt(partes[0]) * 3600 + parseInt(partes[1]) * 60 + parseInt(partes[2]);
-      } else if (partes.length === 2) {
-        // MM:SS
-        return parseInt(partes[0]) * 60 + parseInt(partes[1]);
-      }
+      if (partes.length === 3) return parseInt(partes[0]) * 3600 + parseInt(partes[1]) * 60 + parseInt(partes[2]);
+      else if (partes.length === 2) return parseInt(partes[0]) * 60 + parseInt(partes[1]);
     }
-    // Se é um número puro como string
     let s = parseFloat(str.replace(',', '.'));
     return isNaN(s) ? 0 : s;
   }
@@ -1033,312 +995,254 @@ function descobrirTurnoCompleto(hora, maq, config) {
   return null;
 }
 function formatarHoraExcel(val) {
-  // Se é um Date object (Google Sheets armazena horários como Date)
-  if (val instanceof Date && !isNaN(val.getTime())) {
-    const h = val.getHours();
-    const m = val.getMinutes();
-    const s = val.getSeconds();
-    return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
-  }
-
-  // Se já é uma string formatada (ex: "1:30:14"), retorna direto
-  if (typeof val === 'string' && val.includes(':')) {
-    return val;
-  }
-
-  // Se é um número (fração de dia), converte para HH:MM:SS
-  if (typeof val === 'number' && val >= 0 && !isNaN(val)) {
+  if (val instanceof Date) return `${val.getHours().toString().padStart(2,'0')}:${val.getMinutes().toString().padStart(2,'0')}:${val.getSeconds().toString().padStart(2,'0')}`;
+  if (typeof val === 'number') {
     let s = Math.round(val * 86400);
     let h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
     return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
   }
-
-  // Caso padrão
-  return "00:00:00";
+  return String(val);
 }
-
-// Formata valores que podem ser strings ou Date objects
 function formatarCelulaParada(val) {
   if (!val || val === "" || val === "-") return "-";
-
-  // Se é Date object, formatar
-  if (val instanceof Date && !isNaN(val.getTime())) {
-    return formatarHoraExcel(val);
-  }
-
-  // Se já é string, retornar direto
+  if (val instanceof Date && !isNaN(val.getTime())) return formatarHoraExcel(val);
   return String(val);
+}
+function formatarSegundosParaHora(s) {
+  if (typeof s !== 'number' || isNaN(s)) return "00:00:00";
+  s = Math.round(s);
+  let h = Math.floor(s/3600).toString().padStart(2,'0');
+  let m = Math.floor((s%3600)/60).toString().padStart(2,'0');
+  let sec = (s%60).toString().padStart(2,'0');
+  return `${h}:${m}:${sec}`;
 }
 function processarRegistro(resumo, ss, maquina, data, turno, evento, segundos, horarioEvento) {
   if (segundos > 86400) return;
   if (segundos < 0) segundos = 0;
   let dStr = Utilities.formatDate(data, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy");
   let chave = maquina + "|" + dStr + "|" + turno;
-  if (!resumo[chave]) resumo[chave] = { maquina: maquina, data: data, turno: turno, ligada: 0, desligada: 0, listaStop3: [], listaStop10: [], listaStop20: [], listaStop30: [], horarioInicio: null };
-
-  // Capturar horário do primeiro "TEMPO PARADA" (indica quando a máquina começou a rodar)
-  if (evento === "TEMPO PARADA" && !resumo[chave].horarioInicio && horarioEvento) {
-    resumo[chave].horarioInicio = horarioEvento;
+  if (!resumo[chave]) {
+    resumo[chave] = { 
+      maquina: maquina, data: data, turno: turno, 
+      ligada: 0, desligada: 0, 
+      listaStop3: [], listaStop10: [], listaStop20: [], listaStop30: [], 
+      horarioInicio: null, primeiraHora: new Date(horarioEvento), primeiraDuracao: segundos, ultimaHora: new Date(horarioEvento) 
+    };
+  } else {
+    resumo[chave].ultimaHora = new Date(horarioEvento);
   }
 
-  if (evento === "TEMPO PRODUZINDO") {
-    resumo[chave].ligada += segundos;
-  } else {
+  if (evento === "TEMPO PARADA" && !resumo[chave].horarioInicio && horarioEvento) resumo[chave].horarioInicio = horarioEvento;
+  if (evento === "TEMPO PRODUZINDO") resumo[chave].ligada += segundos;
+  else {
     resumo[chave].desligada += segundos;
     if (segundos > 10) {
       if (!resumo[chave].qtdParadas) resumo[chave].qtdParadas = 0;
       resumo[chave].qtdParadas++;
-
-      let adicionado = [];
-      if (segundos > 180) {
-        resumo[chave].listaStop3.push(segundos);
-        adicionado.push(">3min");
+      let hIni = "", hFim = "";
+      if (horarioEvento instanceof Date) {
+         let inicioParada = new Date(horarioEvento.getTime() - (segundos * 1000));
+         hIni = Utilities.formatDate(inicioParada, ss.getSpreadsheetTimeZone(), "HH:mm");
+         hFim = Utilities.formatDate(horarioEvento, ss.getSpreadsheetTimeZone(), "HH:mm");
       }
-      if (segundos > 600) {
-        resumo[chave].listaStop10.push(segundos);
-        adicionado.push(">10min");
-      }
-      if (segundos > 1200) {
-        resumo[chave].listaStop20.push(segundos);
-        adicionado.push(">20min");
-      }
-      if (segundos > 1800) {
-        resumo[chave].listaStop30.push(segundos);
-        adicionado.push(">30min");
-      }
-
-      if (adicionado.length > 0) {
-        Logger.log(`  → Parada ${segundos}s adicionada em: ${adicionado.join(", ")} | Total >3min: ${resumo[chave].listaStop3.length}`);
-      }
+      let objStop = { s: segundos, h: hIni, f: hFim };
+      if (segundos > 180) resumo[chave].listaStop3.push(objStop);
+      if (segundos > 600) resumo[chave].listaStop10.push(objStop);
+      if (segundos > 1200) resumo[chave].listaStop20.push(objStop);
+      if (segundos > 1800) resumo[chave].listaStop30.push(objStop);
     }
+  }
+}
+function registrarGapIntermediario(resumo, ss, maquina, data, turno, segundos, horarioInicio) {
+  let dStr = Utilities.formatDate(data, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy");
+  let chave = maquina + "|" + dStr + "|" + turno;
+  if (!resumo[chave]) return; 
+
+  resumo[chave].desligada += segundos;
+  if (segundos > 10) {
+    if (!resumo[chave].qtdParadas) resumo[chave].qtdParadas = 0;
+    resumo[chave].qtdParadas++;
+    let hIni = "", hFim = "";
+    if (horarioInicio instanceof Date) {
+       hIni = Utilities.formatDate(horarioInicio, ss.getSpreadsheetTimeZone(), "HH:mm");
+       let fimParada = new Date(horarioInicio.getTime() + (segundos * 1000));
+       hFim = Utilities.formatDate(fimParada, ss.getSpreadsheetTimeZone(), "HH:mm");
+    }
+    let objStop = { s: segundos, h: hIni, f: hFim };
+    if (segundos > 180) resumo[chave].listaStop3.push(objStop);
+    if (segundos > 600) resumo[chave].listaStop10.push(objStop);
+    if (segundos > 1200) resumo[chave].listaStop20.push(objStop);
+    if (segundos > 1800) resumo[chave].listaStop30.push(objStop);
   }
 }
 function formatarListaTempos(lista) {
   if (!lista || !lista.length) return "-";
-  return lista.map(s => {
-    s = Math.max(0, parseFloat(s) || 0);
-    let h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60);
-    return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
+  return lista.map(item => {
+    let s = 0, h = "", f = "";
+    if (typeof item === 'object' && item.s) { s = parseFloat(item.s) || 0; h = item.h || ""; f = item.f || ""; } else { s = parseFloat(item) || 0; }
+    s = Math.max(0, s);
+    let hh = Math.floor(s/3600), mm = Math.floor((s%3600)/60), sec = Math.floor(s%60);
+    let duracaoStr = `${hh.toString().padStart(2,'0')}:${mm.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
+    if (h && f) return `${duracaoStr} (${h} - ${f})`;
+    if (h) return `${duracaoStr} (${h})`;
+    return duracaoStr;
   }).join(", ");
 }
-function exibirMensagem(msg) {
-  try { SpreadsheetApp.getUi().alert(msg); } catch (e) { console.log(msg); }
-}
 
-// === FUNÇÃO DE DIAGNÓSTICO ===
-function diagnosticarMaquina(nomeMaquina) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetDados = ss.getSheetByName("Página1");
+// ==========================================================
+// 7. DISPARO DE E-MAIL (AUTOMÁTICO E TESTE)
+// ==========================================================
 
-  if (!sheetDados) return { erro: "Aba Página1 não encontrada" };
-
-  const dados = sheetDados.getDataRange().getValues();
-  const registros = [];
-
-  // Buscar últimos 10 registros da máquina
-  for (let i = dados.length - 1; i > 0 && registros.length < 10; i--) {
-    let linha = dados[i];
-    let maqLinha = String(linha[2]).trim();
-
-    if (maqLinha === nomeMaquina) {
-      registros.push({
-        linha: i + 1,
-        data: linha[0],
-        hora: linha[1],
-        maquina: linha[2],
-        evento: linha[3],
-        duracao: linha[4]
-      });
-    }
-  }
-
-  return {
-    maquina: nomeMaquina,
-    totalRegistros: registros.length,
-    ultimoEvento: registros.length > 0 ? registros[0].evento : "Nenhum",
-    registros: registros
-  };
-}
-
-// === FUNÇÃO DE TESTE COMPLETO ===
-function testarFuncoes() {
-  Logger.log("=== TESTE DE DIAGNÓSTICO ===");
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  // 1. Verificar abas
-  Logger.log("\n1. ABAS DISPONÍVEIS:");
-  const sheets = ss.getSheets();
-  sheets.forEach(sheet => {
-    Logger.log("  - " + sheet.getName() + " (" + sheet.getLastRow() + " linhas)");
-  });
-
-  // 2. Verificar aba PAINEL
-  Logger.log("\n2. ESTRUTURA ABA PAINEL:");
-  const painel = ss.getSheetByName("PAINEL") || ss.getSheetByName("Painel");
-  if (painel) {
-    const cabecalho = painel.getRange(1, 1, 1, 10).getValues()[0];
-    Logger.log("  Cabeçalhos:");
-    cabecalho.forEach((col, idx) => {
-      Logger.log("    Col " + idx + ": " + col);
-    });
-
-    // Primeira linha de dados
-    if (painel.getLastRow() > 1) {
-      Logger.log("  Primeira linha de dados:");
-      const primeiraLinha = painel.getRange(2, 1, 1, 10).getValues()[0];
-      primeiraLinha.forEach((val, idx) => {
-        Logger.log("    Col " + idx + ": " + val);
-      });
-    }
-  }
-
-  // 3. Verificar aba Página/Pagina
-  Logger.log("\n3. ESTRUTURA ABA PÁGINA/PAGINA:");
-  const pagina = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
-  if (pagina) {
-    Logger.log("  ✓ Encontrada: " + pagina.getName());
-    const cabecalho = pagina.getRange(1, 1, 1, 13).getValues()[0];
-    Logger.log("  Cabeçalhos:");
-    cabecalho.forEach((col, idx) => {
-      Logger.log("    Col " + idx + ": " + col);
-    });
-
-    // Primeira linha de dados
-    if (pagina.getLastRow() > 1) {
-      Logger.log("  Primeira linha de dados:");
-      const primeiraLinha = pagina.getRange(2, 1, 1, 13).getValues()[0];
-      primeiraLinha.forEach((val, idx) => {
-        Logger.log("    Col " + idx + ": " + val);
-      });
-    }
-  } else {
-    Logger.log("  ⚠ Aba 'Página' ou 'Pagina' NÃO ENCONTRADA");
-  }
-
-  Logger.log("\n=== FIM DO TESTE ===");
-}
-
-// Função para testar busca histórica com datas específicas
-function testarBuscaHistorica() {
-  Logger.log("=== TESTE DE BUSCA HISTÓRICA ===");
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const pagina = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
-
-  if (!pagina) {
-    Logger.log("⚠ Aba 'Página' não encontrada!");
-    return;
-  }
-
-  Logger.log("\n1. DADOS NA ABA PÁGINA:");
-  const dados = pagina.getDataRange().getValues();
-  Logger.log("  Total de linhas: " + dados.length);
-
-  // Mostra as primeiras 5 linhas com foco na data
-  Logger.log("\n  Primeiras 5 linhas (Máquina | Turno | Data):");
-  for (let i = 1; i < Math.min(6, dados.length); i++) {
-    let maq = dados[i][0];
-    let turno = dados[i][2];
-    let dataVal = dados[i][3];
-    let dataConvertida = lerDataBR(dataVal);
-
-    Logger.log("    Linha " + i + ":");
-    Logger.log("      Máquina: " + maq);
-    Logger.log("      Turno: " + turno);
-    Logger.log("      Data original: " + dataVal + " (tipo: " + typeof dataVal + ")");
-    Logger.log("      Data convertida: " + dataConvertida);
-    Logger.log("      Data formatada: " + Utilities.formatDate(dataConvertida, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy HH:mm:ss"));
-  }
-
-  // Testa busca com data de hoje
-  Logger.log("\n2. TESTE DE BUSCA COM DATA DE HOJE:");
+// Função para o Trigger (Ontem)
+function enviarRelatorioDiario() {
   const hoje = new Date();
-  const hojeStr = Utilities.formatDate(hoje, ss.getSpreadsheetTimeZone(), "yyyy-MM-dd");
-  Logger.log("  Data de hoje: " + hojeStr);
-
-  // Pega a primeira máquina da aba para teste
-  const maquinaTeste = dados.length > 1 ? String(dados[1][0]).trim() : "";
-  if (maquinaTeste) {
-    Logger.log("  Testando com máquina: " + maquinaTeste);
-    const resultado = buscarHistorico(maquinaTeste, hojeStr, hojeStr);
-    Logger.log("  Resultados encontrados: " + resultado.length);
-    if (resultado.length > 0) {
-      Logger.log("  Primeiro resultado: " + JSON.stringify(resultado[0]));
-    }
-  }
-
-  // Testa busca sem filtro de data
-  Logger.log("\n3. TESTE DE BUSCA SEM FILTRO DE DATA:");
-  if (maquinaTeste) {
-    const resultadoTotal = buscarHistorico(maquinaTeste, null, null);
-    Logger.log("  Resultados encontrados: " + resultadoTotal.length);
-    if (resultadoTotal.length > 0) {
-      Logger.log("  Primeira data: " + resultadoTotal[0].data);
-      Logger.log("  Última data: " + resultadoTotal[resultadoTotal.length - 1].data);
-    }
-  }
-
-  Logger.log("\n=== FIM DO TESTE ===");
+  const ontem = new Date(hoje);
+  ontem.setDate(hoje.getDate() - 1);
+  enviarRelatorioBase(ontem);
 }
 
-// Função para testar busca de histórico com data de hoje
-function testarHistoricoHoje() {
-  Logger.log("=== TESTE HISTÓRICO HOJE ===");
+// Função para Teste Manual (Hoje)
+function testarEnvioEmailHoje() {
+  const hoje = new Date();
+  // const ontem = new Date(hoje);
+  // ontem.setDate(hoje.getDate() - 1);
+  // Logger.log("Iniciando relatório de teste (Ontem)...");
+  // enviarRelatorioBase(ontem);
+  
+  // MANTENDO HOJE PARA TESTE INSTANTANEO DE DADOS RECENTES
+  Logger.log("Iniciando relatório de teste (Hoje)...");
+  enviarRelatorioBase(hoje);
+}
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Pagina") || ss.getSheetByName("Página");
-
-  if (!sheet) {
-    Logger.log("⚠ Aba 'Pagina' não encontrada");
-    return;
-  }
-
-  const dados = sheet.getDataRange().getValues();
+// Lógica central
+function enviarRelatorioBase(dataAlvo) {
+  const ss = getSS();
   const timezone = ss.getSpreadsheetTimeZone();
-
-  // Pegar a primeira máquina
-  const maquinaTeste = dados.length > 1 ? String(dados[1][0]).trim() : "";
-
-  if (!maquinaTeste) {
-    Logger.log("⚠ Nenhuma máquina encontrada");
+  
+  const dataStr = Utilities.formatDate(dataAlvo, timezone, "dd/MM/yyyy");
+  
+  // 1. Pegar E-mails
+  const sheetEmail = ss.getSheetByName("EMAIL");
+  let destinatarios = "";
+  if (sheetEmail) {
+    const lista = sheetEmail.getDataRange().getValues();
+    destinatarios = lista.map(r => r[0]).filter(e => String(e).includes("@")).join(",");
+  }
+  
+  if (!destinatarios) {
+    Logger.log("❌ Nenhum e-mail na aba EMAIL.");
     return;
   }
 
-  // Data de hoje no formato yyyy-MM-dd (igual ao frontend)
-  const hoje = new Date();
-  const hojeStr = Utilities.formatDate(hoje, timezone, "yyyy-MM-dd");
+  // 2. Pegar Máquinas da aba TURNOS (garante que todas apareçam)
+  const sheetTurnos = ss.getSheetByName("TURNOS");
+  const dadosTurnos = sheetTurnos.getDataRange().getValues();
+  const maquinasStats = {}; 
+  
+  for (let i = 1; i < dadosTurnos.length; i++) {
+    let maq = String(dadosTurnos[i][0]).trim();
+    if (maq) maquinasStats[maq] = { "Turno 1": 0, "Turno 2": 0, "Turno 3": 0 };
+  }
 
-  Logger.log("Máquina: " + maquinaTeste);
-  Logger.log("Data de hoje: " + hojeStr);
-  Logger.log("");
+  // 3. Ler Dados do PAINEL (Dados processados e corretos)
+  const sheetPainel = ss.getSheetByName("PAINEL");
+  if (!sheetPainel) return;
 
-  // Mostrar todas as datas disponíveis para essa máquina
-  Logger.log("Datas disponíveis para " + maquinaTeste + ":");
-  for (let i = 1; i < dados.length; i++) {
-    let maq = String(dados[i][0]).trim();
-    if (maq === maquinaTeste) {
-      let dataOriginal = dados[i][3];
-      let dataConvertida = lerDataBR(dataOriginal);
-      let dataStr = Utilities.formatDate(dataConvertida, timezone, "yyyy-MM-dd");
-      let turno = dados[i][2];
+  const dadosPainel = sheetPainel.getDataRange().getValues();
+  // Colunas PAINEL: 0=Maq, 1=Turno, 2=Data, 3=Ligada
+  
+  for (let i = 1; i < dadosPainel.length; i++) {
+    let linha = dadosPainel[i];
+    
+    // Verificar Data
+    let dataLinha = linha[2];
+    let dataLinhaStr = "";
+    if (dataLinha instanceof Date) {
+       dataLinhaStr = Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy");
+    } else {
+       // Tenta converter se for string
+       let d = lerDataBR(dataLinha);
+       dataLinhaStr = Utilities.formatDate(d, timezone, "dd/MM/yyyy");
+    }
 
-      Logger.log("  Linha " + (i+1) + ": " + dataStr + " (" + turno + ")");
+    if (dataLinhaStr !== dataStr) continue;
+
+    let maquina = String(linha[0]).trim();
+    let turno = String(linha[1]).trim();
+    let tempoLigada = linha[3]; // Valor numérico (fração de dia) ou Date
+
+    // Converter para segundos para o formatador do email
+    let segundos = converterParaSegundos(tempoLigada);
+
+    if (maquinasStats[maquina] && maquinasStats[maquina][turno] !== undefined) {
+       maquinasStats[maquina][turno] = segundos;
     }
   }
 
-  Logger.log("");
-  Logger.log("Chamando buscarHistorico('" + maquinaTeste + "', '" + hojeStr + "', '" + hojeStr + "')...");
+  // 4. HTML
+  let html = `
+    <div style="font-family: Arial, sans-serif; color: #333;">
+      <p>Bom dia!</p>
+      <p>Segue produção em horas das máquinas monitoradas na data <strong>${dataStr}</strong>.</p>
+      
+      <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; border: 1px solid #ddd;">
+        <tr style="background-color: #0056b3; color: white;">
+          <th style="text-align: left;">MÁQUINA</th>
+          <th style="text-align: center;">TURNO 1</th>
+          <th style="text-align: center;">TURNO 2</th>
+          <th style="text-align: center;">TURNO 3</th>
+        </tr>
+  `;
+  
+  const nomesMaquinas = Object.keys(maquinasStats).sort();
+  
+  nomesMaquinas.forEach(maq => {
+    html += `<tr><td style="font-weight:bold;">${maq}</td>`;
+    
+    ["Turno 1", "Turno 2", "Turno 3"].forEach(t => {
+      let segundos = maquinasStats[maq][t];
+      let celula = "";
+      if (segundos > 0) {
+        celula = `<span style="color: green; font-weight: bold; font-size: 14px;">${formatarSegundosParaEmail(segundos)}</span>`;
+      } else {
+        celula = `<span style="color: #dc3545; font-size: 10px; font-weight: bold;">SEM OPERAÇÃO NESTE PERÍODO</span>`;
+      }
+      html += `<td style="text-align: center;">${celula}</td>`;
+    });
+    
+    html += `</tr>`;
+  });
+  
+  html += `
+      </table>
+      <br>
+      <p>Atenciosamente,<br><strong>Controle de Rotinas e Prazos Marfim.</strong></p>
+    </div>
+  `;
 
-  const resultado = buscarHistorico(maquinaTeste, hojeStr, hojeStr);
-
-  Logger.log("");
-  Logger.log("Resultado: " + resultado.length + " registros");
-
-  if (resultado.length > 0) {
-    Logger.log("Primeiro registro:");
-    Logger.log(JSON.stringify(resultado[0], null, 2));
+  // 5. Enviar
+  try {
+    MailApp.sendEmail({
+      to: destinatarios,
+      subject: "Controle de Produtividade por Máquina - " + dataStr,
+      htmlBody: html
+    });
+    Logger.log("✅ E-mail enviado para: " + destinatarios);
+  } catch (e) {
+    Logger.log("❌ Erro ao enviar: " + e.message);
   }
+}
 
-  Logger.log("\n=== FIM DO TESTE ===");
+function formatarSegundosParaEmail(segundos) {
+  if (typeof segundos !== 'number' || isNaN(segundos)) return "00:00:00";
+  segundos = Math.round(segundos);
+  const h = Math.floor(segundos/3600).toString().padStart(2,'0');
+  const m = Math.floor((segundos%3600)/60).toString().padStart(2,'0');
+  const s = (segundos%60).toString().padStart(2,'0');
+  return `${h}:${m}:${s}`;
+}
+
+function FORCAR_AUTORIZACAO() {
+  var quota = MailApp.getRemainingDailyQuota();
+  Logger.log("Cota restante: " + quota);
 }
