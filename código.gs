@@ -175,7 +175,9 @@ function buscarDadosTempoReal() {
           totalParada: 0,
           refNomeTurno: nomeTurnoAtual,
           refDataProducao: dataProducaoAtual ? dataProducaoAtual.getTime() : null,
-          horarioInicio: ""
+          horarioInicio: "",
+          primeiraHora: null,
+          primeiraDuracao: 0
         };
       }
       
@@ -206,6 +208,10 @@ function buscarDadosTempoReal() {
                var duracao = parseDuration(linha[4]);
                if (linha[3] === "TEMPO PRODUZINDO") ref.totalProduzindo += duracao;
                else if (linha[3] === "TEMPO PARADA") ref.totalParada += duracao;
+
+               // Rastrear primeiro evento (loop vai de trás pra frente, então sempre sobrescreve)
+               ref.primeiraHora = fullDateReg;
+               ref.primeiraDuracao = duracao;
             }
           }
         }
@@ -248,6 +254,38 @@ function buscarDadosTempoReal() {
             }
           }
        }
+    }
+
+    // Calcular gap inicial (tempo entre início do turno e primeiro evento)
+    for (var maq in statusMaquinas) {
+      var info = statusMaquinas[maq];
+      if (info.refNomeTurno !== "Fora de Turno" && info.refDataProducao !== null && info.primeiraHora) {
+        var configMaq = configTurnos[maq];
+        if (configMaq) {
+          var turnoConfig = configMaq.find(function(t) { return t.nome === info.refNomeTurno; });
+          if (turnoConfig && turnoConfig.inicio) {
+            var dataInicioTurno = new Date(info.refDataProducao);
+            var horaInicioTurno = new Date(turnoConfig.inicio);
+
+            if (!isNaN(horaInicioTurno.getTime()) && !isNaN(dataInicioTurno.getTime())) {
+              dataInicioTurno.setHours(horaInicioTurno.getHours(), horaInicioTurno.getMinutes(), horaInicioTurno.getSeconds(), 0);
+
+              var horaPrimeiroRegistro = new Date(info.primeiraHora);
+
+              if (!isNaN(horaPrimeiroRegistro.getTime())) {
+                // Calcular o início efetivo do evento (subtraindo a duração)
+                var inicioEfetivoEvento = new Date(horaPrimeiroRegistro.getTime() - (info.primeiraDuracao * 1000));
+                var diferencaSegundos = Math.floor((inicioEfetivoEvento.getTime() - dataInicioTurno.getTime()) / 1000);
+
+                // Se há gap de mais de 60 segundos, adicionar como parada
+                if (diferencaSegundos >= 60) {
+                  info.totalParada += diferencaSegundos;
+                }
+              }
+            }
+          }
+        }
+      }
     }
 
     return JSON.stringify(statusMaquinas);
