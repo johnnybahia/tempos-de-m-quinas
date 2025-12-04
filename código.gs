@@ -1046,6 +1046,24 @@ function formatarCelulaParada(val) {
   if (val instanceof Date && !isNaN(val.getTime())) return formatarHoraExcel(val);
   return String(val);
 }
+function converterParaSegundos(val) {
+  if (typeof val === 'number') {
+    return Math.round(val * 86400);
+  }
+  if (val instanceof Date) {
+    return val.getHours() * 3600 + val.getMinutes() * 60 + val.getSeconds();
+  }
+  if (typeof val === 'string') {
+    const partes = val.split(':');
+    if (partes.length === 3) {
+      const h = parseInt(partes[0]) || 0;
+      const m = parseInt(partes[1]) || 0;
+      const s = parseInt(partes[2]) || 0;
+      return h * 3600 + m * 60 + s;
+    }
+  }
+  return 0;
+}
 function formatarSegundosParaHora(s) {
   if (typeof s !== 'number' || isNaN(s)) return "00:00:00";
   s = Math.round(s);
