@@ -352,7 +352,8 @@ function buscarDadosGrafico(maquinaNome) {
     let horas = parseFloat((segundos / 3600).toFixed(2));
 
     if (output[turno] && index !== undefined) {
-      output[turno][index] += horas;
+      // Substituir ao invés de acumular (para evitar duplicações)
+      output[turno][index] = horas;
     }
   }
 
