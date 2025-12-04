@@ -302,26 +302,9 @@ function buscarDadosTempoReal() {
 
 function buscarDadosGrafico(maquinaNome) {
   const ss = getSS();
-  const sheet = ss.getSheetByName("Página1");
-  const sheetTurnos = ss.getSheetByName("TURNOS");
-  
-  if (!sheet || !sheetTurnos) return { erro: "Abas não encontradas" };
+  const sheet = ss.getSheetByName("PAINEL");
 
-  const dadosTurnosConfig = sheetTurnos.getDataRange().getValues();
-  let configTurnosMaq = [];
-  
-  for (let i = 1; i < dadosTurnosConfig.length; i++) {
-    if (String(dadosTurnosConfig[i][0]).trim() === maquinaNome) {
-       configTurnosMaq = [
-         { nome: "Turno 1", inicio: dadosTurnosConfig[i][1], fim: dadosTurnosConfig[i][2] },
-         { nome: "Turno 2", inicio: dadosTurnosConfig[i][3], fim: dadosTurnosConfig[i][4] },
-         { nome: "Turno 3", inicio: dadosTurnosConfig[i][5], fim: dadosTurnosConfig[i][6] }
-       ];
-       break;
-    }
-  }
-  
-  if (configTurnosMaq.length === 0) return { erro: "Turnos não configurados" };
+  if (!sheet) return { erro: "Aba PAINEL não encontrada" };
 
   const dados = sheet.getDataRange().getValues();
   const hoje = new Date();
@@ -331,10 +314,11 @@ function buscarDadosGrafico(maquinaNome) {
 
   const timezone = ss.getSpreadsheetTimeZone();
   const labels = [];
-  
+
   const output = { "Turno 1": [], "Turno 2": [], "Turno 3": [] };
   const mapIndices = {};
 
+  // Criar array de dias dos últimos 30 dias
   let idx = 0;
   for (let d = new Date(dataLimite); d <= hoje; d.setDate(d.getDate() + 1)) {
     let k = Utilities.formatDate(d, timezone, "dd/MM");
@@ -345,57 +329,36 @@ function buscarDadosGrafico(maquinaNome) {
     mapIndices[k] = idx++;
   }
 
+  // Processar dados do PAINEL
   for (let i = 1; i < dados.length; i++) {
-    let nome = String(dados[i][2]).trim();
-    if (nome !== maquinaNome) continue;
+    let linha = dados[i];
+    let maqLinha = String(linha[0]).trim();
 
-    let dataLinha = lerDataBR(dados[i][0]);
+    if (maqLinha !== maquinaNome) continue;
+
+    let turno = String(linha[1]).trim();
+    let dataLinha = lerDataBR(linha[2]);
+
     if (dataLinha < dataLimite) continue;
-
-    let evento = String(dados[i][3]).trim();
-    if (evento !== "TEMPO PRODUZINDO") continue;
 
     let dataStr = Utilities.formatDate(dataLinha, timezone, "dd/MM");
     let index = mapIndices[dataStr];
+
     if (index === undefined) continue;
 
-    let hora = dados[i][1];
-    let duracao = parseDuration(dados[i][4]);
+    // Pegar tempo ligada (coluna 3) - já está em formato Excel (número decimal)
+    let tempoLigada = linha[3];
+    let segundos = converterParaSegundos(tempoLigada);
+    let horas = parseFloat((segundos / 3600).toFixed(2));
 
-    let turnoEncontrado = "Fora";
-    let min = 0;
-    if(hora instanceof Date) min = hora.getHours()*60 + hora.getMinutes();
-    else min = horaParaMinutos(hora);
-
-    for(let t of configTurnosMaq) {
-       let iT = horaParaMinutos(t.inicio);
-       let fT = horaParaMinutos(t.fim);
-       let cruza = iT > fT;
-       if (!cruza) { if (min >= iT && min < fT) turnoEncontrado = t.nome; }
-       else { if (min >= iT || min < fT) turnoEncontrado = t.nome; }
-    }
-
-    if (turnoEncontrado !== "Fora") {
-       let tInfo = configTurnosMaq.find(t => t.nome === turnoEncontrado);
-       if (tInfo) {
-         let iT = horaParaMinutos(tInfo.inicio);
-         let fT = horaParaMinutos(tInfo.fim);
-         if (iT > fT && min < fT) {
-             let dAnt = new Date(dataLinha);
-             dAnt.setDate(dAnt.getDate() - 1);
-             let kAnt = Utilities.formatDate(dAnt, timezone, "dd/MM");
-             index = mapIndices[kAnt];
-         }
-       }
-    }
-
-    if (output[turnoEncontrado] && index !== undefined) {
-      output[turnoEncontrado][index] += duracao;
+    if (output[turno] && index !== undefined) {
+      output[turno][index] += horas;
     }
   }
 
+  // Arredondar valores finais para 2 casas decimais
   ["Turno 1", "Turno 2", "Turno 3"].forEach(t => {
-    output[t] = output[t].map(s => parseFloat((s/3600).toFixed(2)));
+    output[t] = output[t].map(h => parseFloat(h.toFixed(2)));
   });
 
   return {
@@ -797,6 +760,78 @@ function gerarRelatorioTurnos() {
       mapUltimoFim[chaveGap] = dataFim;
 
       processarRegistro(resumo, ss, maquina, dataProducao, infoTurno.nome, nomeEvento, duracao, dataFim);
+    }
+  }
+
+  // Adicionar turnos sem eventos como paradas completas
+  const diasParaVerificar = 7; // Últimos 7 dias
+  const dataLimiteVerificacao = new Date(agora);
+  dataLimiteVerificacao.setDate(dataLimiteVerificacao.getDate() - diasParaVerificar);
+  dataLimiteVerificacao.setHours(0, 0, 0, 0);
+
+  for (let maquinaKey in configTurnos) {
+    let turnosConfig = configTurnos[maquinaKey];
+
+    // Para cada dia dos últimos X dias
+    for (let d = new Date(dataLimiteVerificacao); d <= agora; d.setDate(d.getDate() + 1)) {
+      let dataVerificacao = new Date(d);
+      dataVerificacao.setHours(0, 0, 0, 0);
+      let dataStr = Utilities.formatDate(dataVerificacao, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy");
+
+      // Para cada turno configurado
+      turnosConfig.forEach(turnoConfig => {
+        let chave = maquinaKey + "|" + dataStr + "|" + turnoConfig.nome;
+
+        // Se não existe entrada no resumo = máquina parada o turno inteiro
+        if (!resumo[chave]) {
+          // Calcular duração do turno em segundos
+          let horaInicio = new Date(turnoConfig.inicio);
+          let horaFim = new Date(turnoConfig.fim);
+
+          let minInicio = horaInicio.getHours() * 60 + horaInicio.getMinutes();
+          let minFim = horaFim.getHours() * 60 + horaFim.getMinutes();
+
+          let duracaoTurnoSegundos;
+          if (minFim > minInicio) {
+            duracaoTurnoSegundos = (minFim - minInicio) * 60;
+          } else {
+            // Turno cruza meia-noite
+            duracaoTurnoSegundos = ((1440 - minInicio) + minFim) * 60;
+          }
+
+          // Criar entrada com turno completo como parada
+          let horaInicioTurno = new Date(dataVerificacao);
+          horaInicioTurno.setHours(horaInicio.getHours(), horaInicio.getMinutes(), 0, 0);
+
+          let horaFimTurno = new Date(dataVerificacao);
+          horaFimTurno.setHours(horaFim.getHours(), horaFim.getMinutes(), 0, 0);
+          if (minFim <= minInicio) {
+            horaFimTurno.setDate(horaFimTurno.getDate() + 1);
+          }
+
+          // Formatar horários para a parada crítica
+          let hIni = Utilities.formatDate(horaInicioTurno, ss.getSpreadsheetTimeZone(), "HH:mm");
+          let hFim = Utilities.formatDate(horaFimTurno, ss.getSpreadsheetTimeZone(), "HH:mm");
+
+          let objParada = { s: duracaoTurnoSegundos, h: hIni, f: hFim };
+
+          resumo[chave] = {
+            maquina: maquinaKey,
+            data: dataVerificacao,
+            turno: turnoConfig.nome,
+            ligada: 0,
+            desligada: duracaoTurnoSegundos,
+            listaStop3: duracaoTurnoSegundos > 180 ? [objParada] : [],
+            listaStop10: duracaoTurnoSegundos > 600 ? [objParada] : [],
+            listaStop20: duracaoTurnoSegundos > 1200 ? [objParada] : [],
+            listaStop30: duracaoTurnoSegundos > 1800 ? [objParada] : [],
+            horarioInicio: null,
+            primeiraHora: null,
+            primeiraDuracao: 0,
+            ultimaHora: null
+          };
+        }
+      });
     }
   }
 
