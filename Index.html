@@ -610,8 +610,132 @@
              selectFamilia.appendChild(option);
           });
       }
-      function gerarRelatorioFamilia() { /* ... Mantido ... */ }
-      function imprimirRelatorioFamilia() { /* ... Mantido ... */ }
+      function gerarRelatorioFamilia() {
+        const familia = document.getElementById('filtro-familia').value;
+        const dataInicio = document.getElementById('relatorio-data-inicio').value;
+        const dataFim = document.getElementById('relatorio-data-fim').value;
+
+        if (!familia) {
+          alert('Por favor, selecione uma família de máquinas');
+          return;
+        }
+        if (!dataInicio || !dataFim) {
+          alert('Por favor, selecione o período (data início e fim)');
+          return;
+        }
+
+        // Mostrar loading
+        document.getElementById('relatorio-titulo').textContent = `📊 Relatório: ${familia}`;
+        document.getElementById('relatorio-conteudo').innerHTML = '<div style="text-align:center; padding:60px;"><div style="font-size:18px; color:#666;">⏳ Gerando relatório...</div><div style="font-size:13px; color:#999; margin-top:10px;">Processando dados da família ' + familia + '</div></div>';
+        document.getElementById('relatorio-acoes').style.display = 'none';
+
+        // Chamar backend
+        google.script.run
+          .withSuccessHandler(renderizarRelatorioFamilia)
+          .withFailureHandler(erro => {
+            document.getElementById('relatorio-conteudo').innerHTML = '<div style="text-align:center; padding:40px; color:#dc3545;">❌ Erro ao gerar relatório: ' + erro + '</div>';
+            document.getElementById('relatorio-acoes').style.display = 'none';
+          })
+          .buscarRelatorioFamilia(familia, dataInicio, dataFim);
+      }
+
+      function renderizarRelatorioFamilia(dados) {
+        if (!dados || !dados.maquinas || dados.maquinas.length === 0) {
+          document.getElementById('relatorio-conteudo').innerHTML = '<div style="text-align:center; padding:40px; color:#999;">📭 Nenhum dado encontrado para esta família no período selecionado</div>';
+          document.getElementById('relatorio-acoes').style.display = 'none';
+          return;
+        }
+
+        let html = '';
+
+        // Cabeçalho do relatório
+        html += `<div style="background:#f8f9fa; padding:20px; border-radius:8px; margin-bottom:20px;">
+          <h2 style="margin:0 0 15px 0; color:#333;">FAMÍLIA: ${dados.familia}</h2>
+          <div style="font-size:14px; color:#666; margin-bottom:15px;">Período: ${dados.dataInicio} até ${dados.dataFim}</div>
+          <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:15px;">
+            <div style="background:white; padding:15px; border-radius:5px; border-left:4px solid #28a745;">
+              <div style="font-size:12px; color:#666; margin-bottom:5px;">TEMPO RODANDO TOTAL</div>
+              <div style="font-size:24px; font-weight:bold; color:#28a745;">${dados.totais.rodando}</div>
+            </div>
+            <div style="background:white; padding:15px; border-radius:5px; border-left:4px solid #dc3545;">
+              <div style="font-size:12px; color:#666; margin-bottom:5px;">TEMPO PARADO TOTAL</div>
+              <div style="font-size:24px; font-weight:bold; color:#dc3545;">${dados.totais.parado}</div>
+            </div>
+            <div style="background:white; padding:15px; border-radius:5px; border-left:4px solid #ff8c00;">
+              <div style="font-size:12px; color:#666; margin-bottom:5px;">PARADAS CRÍTICAS TOTAL</div>
+              <div style="font-size:24px; font-weight:bold; color:#ff8c00;">${dados.totais.paradasCriticas}</div>
+            </div>
+          </div>
+        </div>`;
+
+        // Detalhamento por máquina
+        dados.maquinas.forEach(maq => {
+          html += `<div style="margin-bottom:30px; page-break-inside:avoid;">
+            <div style="background:#007bff; color:white; padding:12px 20px; border-radius:5px 5px 0 0; font-weight:bold; font-size:16px;">
+              ${maq.nome}
+            </div>
+            <div class="table-wrapper">
+              <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                <thead>
+                  <tr style="background:#f8f9fa;">
+                    <th style="padding:8px; border:1px solid #ddd; text-align:left;">Data</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:center;">Turno</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:center; background:#e8f5e9;">Tempo Ligada</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:center; background:#ffebee;">Tempo Parada</th>
+                    <th style="padding:8px; border:1px solid #ddd; text-align:left; background:#fff3e0;">Paradas > 3min</th>
+                  </tr>
+                </thead>
+                <tbody>`;
+
+          maq.turnos.forEach(turno => {
+            html += `<tr>
+              <td style="padding:8px; border:1px solid #ddd; font-weight:500;">${turno.data}</td>
+              <td style="padding:8px; border:1px solid #ddd; text-align:center;"><span style="background:#e3f2fd; padding:4px 8px; border-radius:3px; font-weight:bold; font-size:11px;">${turno.turno}</span></td>
+              <td style="padding:8px; border:1px solid #ddd; text-align:center; color:#2e7d32; font-weight:bold; background:#f1f8f4;">${turno.ligada}</td>
+              <td style="padding:8px; border:1px solid #ddd; text-align:center; color:#c62828; font-weight:bold; background:#fef5f5;">${turno.desligada}</td>
+              <td style="padding:8px; border:1px solid #ddd; font-size:10px; color:#e65100; font-weight:bold; background:#fff8f0;">${turno.paradas3min}</td>
+            </tr>`;
+          });
+
+          html += `</tbody></table></div></div>`;
+        });
+
+        document.getElementById('relatorio-conteudo').innerHTML = html;
+
+        // Mostrar botão de imprimir
+        document.getElementById('relatorio-acoes').style.display = 'block';
+      }
+
+      function imprimirRelatorioFamilia() {
+        const conteudo = document.getElementById('relatorio-conteudo').innerHTML;
+        const familia = document.getElementById('filtro-familia').value;
+
+        const janela = window.open('', '_blank');
+        janela.document.write(`
+          <html>
+            <head>
+              <title>Relatório - ${familia}</title>
+              <style>
+                body { font-family: Arial, sans-serif; padding: 20px; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                th, td { padding: 8px; border: 1px solid #ddd; }
+                th { background: #f8f9fa; font-weight: bold; }
+                @media print {
+                  .no-print { display: none; }
+                  body { padding: 0; }
+                }
+              </style>
+            </head>
+            <body>
+              ${conteudo}
+              <script>
+                window.onload = function() { window.print(); }
+              <\/script>
+            </body>
+          </html>
+        `);
+        janela.document.close();
+      }
     </script>
   </body>
 </html>
