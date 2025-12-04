@@ -763,6 +763,78 @@ function gerarRelatorioTurnos() {
     }
   }
 
+  // Adicionar turnos sem eventos como paradas completas
+  const diasParaVerificar = 7; // Últimos 7 dias
+  const dataLimiteVerificacao = new Date(agora);
+  dataLimiteVerificacao.setDate(dataLimiteVerificacao.getDate() - diasParaVerificar);
+  dataLimiteVerificacao.setHours(0, 0, 0, 0);
+
+  for (let maquinaKey in configTurnos) {
+    let turnosConfig = configTurnos[maquinaKey];
+
+    // Para cada dia dos últimos X dias
+    for (let d = new Date(dataLimiteVerificacao); d <= agora; d.setDate(d.getDate() + 1)) {
+      let dataVerificacao = new Date(d);
+      dataVerificacao.setHours(0, 0, 0, 0);
+      let dataStr = Utilities.formatDate(dataVerificacao, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy");
+
+      // Para cada turno configurado
+      turnosConfig.forEach(turnoConfig => {
+        let chave = maquinaKey + "|" + dataStr + "|" + turnoConfig.nome;
+
+        // Se não existe entrada no resumo = máquina parada o turno inteiro
+        if (!resumo[chave]) {
+          // Calcular duração do turno em segundos
+          let horaInicio = new Date(turnoConfig.inicio);
+          let horaFim = new Date(turnoConfig.fim);
+
+          let minInicio = horaInicio.getHours() * 60 + horaInicio.getMinutes();
+          let minFim = horaFim.getHours() * 60 + horaFim.getMinutes();
+
+          let duracaoTurnoSegundos;
+          if (minFim > minInicio) {
+            duracaoTurnoSegundos = (minFim - minInicio) * 60;
+          } else {
+            // Turno cruza meia-noite
+            duracaoTurnoSegundos = ((1440 - minInicio) + minFim) * 60;
+          }
+
+          // Criar entrada com turno completo como parada
+          let horaInicioTurno = new Date(dataVerificacao);
+          horaInicioTurno.setHours(horaInicio.getHours(), horaInicio.getMinutes(), 0, 0);
+
+          let horaFimTurno = new Date(dataVerificacao);
+          horaFimTurno.setHours(horaFim.getHours(), horaFim.getMinutes(), 0, 0);
+          if (minFim <= minInicio) {
+            horaFimTurno.setDate(horaFimTurno.getDate() + 1);
+          }
+
+          // Formatar horários para a parada crítica
+          let hIni = Utilities.formatDate(horaInicioTurno, ss.getSpreadsheetTimeZone(), "HH:mm");
+          let hFim = Utilities.formatDate(horaFimTurno, ss.getSpreadsheetTimeZone(), "HH:mm");
+
+          let objParada = { s: duracaoTurnoSegundos, h: hIni, f: hFim };
+
+          resumo[chave] = {
+            maquina: maquinaKey,
+            data: dataVerificacao,
+            turno: turnoConfig.nome,
+            ligada: 0,
+            desligada: duracaoTurnoSegundos,
+            listaStop3: duracaoTurnoSegundos > 180 ? [objParada] : [],
+            listaStop10: duracaoTurnoSegundos > 600 ? [objParada] : [],
+            listaStop20: duracaoTurnoSegundos > 1200 ? [objParada] : [],
+            listaStop30: duracaoTurnoSegundos > 1800 ? [objParada] : [],
+            horarioInicio: null,
+            primeiraHora: null,
+            primeiraDuracao: 0,
+            ultimaHora: null
+          };
+        }
+      });
+    }
+  }
+
   const agoraTimestamp = agora.getTime();
 
   for (let chave in resumo) {
