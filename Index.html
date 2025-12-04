@@ -543,6 +543,7 @@
          const s = document.getElementById('apt-motivo');
          s.innerHTML = "";
          l.motivos.forEach(m => { let o = document.createElement('option'); o.text = m; s.add(o); });
+         FamiliasDisponiveis = l.familias || [];
       }
       function salvarForm() { 
          const btn = document.querySelector('button.save');
