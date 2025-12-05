@@ -109,10 +109,11 @@ function buscarDadosTempoReal() {
         ];
 
         // Ler metas por turno da aba TURNOS (colunas H, I, J = índices 7, 8, 9)
+        // Suporta tanto números decimais quanto formato de horário (HH:MM)
         mapaMetas[maqNome] = {
-          "Turno 1": parseFloat(dadosTurnos[i][7]) || 0,
-          "Turno 2": parseFloat(dadosTurnos[i][8]) || 0,
-          "Turno 3": parseFloat(dadosTurnos[i][9]) || 0
+          "Turno 1": converterMetaParaHoras(dadosTurnos[i][7]),
+          "Turno 2": converterMetaParaHoras(dadosTurnos[i][8]),
+          "Turno 3": converterMetaParaHoras(dadosTurnos[i][9])
         };
       }
     }
@@ -341,9 +342,9 @@ function buscarDadosGrafico(maquinaNome) {
     const dadosTurnos = sheetTurnos.getDataRange().getValues();
     for (let i = 1; i < dadosTurnos.length; i++) {
       if (String(dadosTurnos[i][0]).trim() === maquinaNome) {
-        metaTurno1 = parseFloat(dadosTurnos[i][7]) || 0;
-        metaTurno2 = parseFloat(dadosTurnos[i][8]) || 0;
-        metaTurno3 = parseFloat(dadosTurnos[i][9]) || 0;
+        metaTurno1 = converterMetaParaHoras(dadosTurnos[i][7]);
+        metaTurno2 = converterMetaParaHoras(dadosTurnos[i][8]);
+        metaTurno3 = converterMetaParaHoras(dadosTurnos[i][9]);
         break;
       }
     }
@@ -1119,6 +1120,34 @@ function obterHoraInicioPrimeiroTurno(maq, config) {
   }
   return 7; // Fallback padrão
 }
+function converterMetaParaHoras(valor) {
+  // Converte valor de meta para horas decimais
+  // Suporta: números decimais (9.8), Date objects (05:25:00), strings vazio
+
+  if (!valor || valor === "") return 0;
+
+  // Se for número, retorna direto
+  if (typeof valor === 'number') {
+    return parseFloat(valor) || 0;
+  }
+
+  // Se for Date object (formato de horário HH:MM do Google Sheets)
+  if (valor instanceof Date && !isNaN(valor.getTime())) {
+    const horas = valor.getHours();
+    const minutos = valor.getMinutes();
+    const segundos = valor.getSeconds();
+    // Converter para horas decimais: 5h25min = 5 + (25/60) = 5.4166...
+    return parseFloat((horas + (minutos / 60) + (segundos / 3600)).toFixed(4));
+  }
+
+  // Se for string, tenta converter
+  if (typeof valor === 'string') {
+    const num = parseFloat(valor);
+    if (!isNaN(num)) return num;
+  }
+
+  return 0;
+}
 function formatarHoraExcel(val) {
   if (val instanceof Date) return `${val.getHours().toString().padStart(2,'0')}:${val.getMinutes().toString().padStart(2,'0')}:${val.getSeconds().toString().padStart(2,'0')}`;
   if (typeof val === 'number') {
@@ -1424,10 +1453,10 @@ function testarLeituraMetas() {
     Logger.log("    Coluna H (META T1) - Valor bruto: " + metaT1 + " | Tipo: " + typeof metaT1);
     Logger.log("    Coluna I (META T2) - Valor bruto: " + metaT2 + " | Tipo: " + typeof metaT2);
     Logger.log("    Coluna J (META T3) - Valor bruto: " + metaT3 + " | Tipo: " + typeof metaT3);
-    Logger.log("    Após parseFloat:");
-    Logger.log("      META T1: " + (parseFloat(metaT1) || 0));
-    Logger.log("      META T2: " + (parseFloat(metaT2) || 0));
-    Logger.log("      META T3: " + (parseFloat(metaT3) || 0));
+    Logger.log("    ✅ Após converterMetaParaHoras:");
+    Logger.log("      META T1: " + converterMetaParaHoras(metaT1) + " horas");
+    Logger.log("      META T2: " + converterMetaParaHoras(metaT2) + " horas");
+    Logger.log("      META T3: " + converterMetaParaHoras(metaT3) + " horas");
   }
 
   Logger.log("\n✅ Teste concluído! Verifique os logs acima.");
