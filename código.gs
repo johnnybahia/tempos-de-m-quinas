@@ -1466,6 +1466,11 @@ function testarLeituraMetas() {
 // FUNÇÃO DE DEBUG: Rastrear cálculos de tempo de uma máquina
 // ==========================================================
 
+// Wrapper para executar facilmente pelo dropdown do Apps Script
+function DEBUG_espuladeira_torre_4_bocas() {
+  debugarCalculosMaquina("espuladeira torre 4 bocas");
+}
+
 function debugarCalculosMaquina(nomeMaquina) {
   try {
     Logger.log("🔍 ========================================");
