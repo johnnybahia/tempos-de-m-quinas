@@ -1468,7 +1468,7 @@ function testarLeituraMetas() {
 
 // Wrapper para executar facilmente pelo dropdown do Apps Script
 function DEBUG_espuladeira_torre_4_bocas() {
-  debugarCalculosMaquina("espuladeira torre 4 bocas");
+  debugarCalculosMaquina("ESPULADEIRA TORRE 4 BOCAS");
 }
 
 // Função para listar todas as máquinas e suas configurações de turno
@@ -1568,7 +1568,7 @@ function DEBUG_listar_maquinas_e_turnos() {
     Logger.log("🔍 BUSCAR MÁQUINA ESPECÍFICA");
     Logger.log("🔍 ========================================\n");
 
-    const buscar = "espuladeira torre 4 bocas";
+    const buscar = "ESPULADEIRA TORRE 4 BOCAS";
     Logger.log("Buscando por: [" + buscar + "]");
     Logger.log("");
 
