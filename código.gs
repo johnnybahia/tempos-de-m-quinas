@@ -1055,16 +1055,21 @@ function horaParaMinutos(val) {
   if (typeof val === 'string' && val.includes(':')) { let p = val.split(':'); return parseInt(p[0]) * 60 + parseInt(p[1]); }
   return 0;
 }
-function descobrirTurnoCompleto(hora, maq, config) { 
+function descobrirTurnoCompleto(hora, maq, config) {
   let c = config[maq] || config[String(maq).trim()];
   if(!c) return null;
   let min = horaParaMinutos(new Date(hora));
   for(let t of c) {
      let i = horaParaMinutos(t.inicio);
      let f = horaParaMinutos(t.fim);
+
+     // Validar se os valores são válidos
+     if (i === 0 && f === 0) continue; // Turno não configurado
+
      let cruza = i > f;
-     if (!cruza) { if (min >= i && min < f) return { nome: t.nome, minInicio: i, minFim: f, cruzaMeiaNoite: false }; }
-     else { if (min >= i || min < f) return { nome: t.nome, minInicio: i, minFim: f, cruzaMeiaNoite: true }; }
+     // Usar <= para incluir o último minuto do turno
+     if (!cruza) { if (min >= i && min <= f) return { nome: t.nome, minInicio: i, minFim: f, cruzaMeiaNoite: false }; }
+     else { if (min >= i || min <= f) return { nome: t.nome, minInicio: i, minFim: f, cruzaMeiaNoite: true }; }
   }
   return null;
 }
