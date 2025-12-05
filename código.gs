@@ -937,44 +937,39 @@ function gerarRelatorioTurnos() {
       Logger.log(`Erro ao calcular parada inicial para ${item.maquina} ${item.turno}: ${e.message}`);
     }
 
-    let itemDataStr = Utilities.formatDate(new Date(item.data), ss.getSpreadsheetTimeZone(), "dd/MM/yyyy");
-    let ehDeHoje = (itemDataStr === dataHojeStr);
-
-    if (mapaPainelExistente[chave] && !ehDeHoje) {
-       rowFinal = mapaPainelExistente[chave];
-    } else {
-       let manual = { motivo: "", servico: "", pecas: "", custoPecas: "", obs: "" };
-       let horarioInicioAnterior = "";
-       if (mapaPainelExistente[chave]) {
-         let old = mapaPainelExistente[chave];
-         manual = { motivo: old[10], servico: old[11], pecas: old[12], custoPecas: old[13], obs: old[14] };
-         horarioInicioAnterior = old[15] || "";
-       }
-
-       let tempoParadoLiq = Math.max(0, item.desligada - 3600);
-       let custoMO = 0; 
-       let valLigada = Math.max(0, item.ligada) / SEGUNDOS_DIA;
-       let valDesligada = Math.max(0, item.desligada) / SEGUNDOS_DIA;
-
-       let horarioInicioStr = horarioInicioAnterior;
-       if (item.horarioInicio) {
-         let horaObj = new Date(item.horarioInicio);
-         if (!isNaN(horaObj.getTime())) {
-           horarioInicioStr = Utilities.formatDate(horaObj, ss.getSpreadsheetTimeZone(), "HH:mm:ss");
-         }
-       }
-
-       if(item.listaStop3.length > 0) item.listaStop3.sort((a,b) => b.s - a.s);
-       if(item.listaStop10.length > 0) item.listaStop10.sort((a,b) => b.s - a.s);
-       if(item.listaStop20.length > 0) item.listaStop20.sort((a,b) => b.s - a.s);
-       if(item.listaStop30.length > 0) item.listaStop30.sort((a,b) => b.s - a.s);
-
-       rowFinal = [
-          item.maquina, item.turno, item.data, valLigada, valDesligada,
-          formatarListaTempos(item.listaStop3), formatarListaTempos(item.listaStop10), formatarListaTempos(item.listaStop20), formatarListaTempos(item.listaStop30),
-          custoMO, manual.motivo, manual.servico, manual.pecas, manual.custoPecas, manual.obs, horarioInicioStr
-       ];
+    // SEMPRE recalcular tempos (ligada, desligada, paradas) mesmo para dias antigos
+    // MAS preservar apontamentos manuais (motivo, serviço, peças, custos, obs) se existirem
+    let manual = { motivo: "", servico: "", pecas: "", custoPecas: "", obs: "" };
+    let horarioInicioAnterior = "";
+    if (mapaPainelExistente[chave]) {
+      let old = mapaPainelExistente[chave];
+      manual = { motivo: old[10], servico: old[11], pecas: old[12], custoPecas: old[13], obs: old[14] };
+      horarioInicioAnterior = old[15] || "";
     }
+
+    let tempoParadoLiq = Math.max(0, item.desligada - 3600);
+    let custoMO = 0;
+    let valLigada = Math.max(0, item.ligada) / SEGUNDOS_DIA;
+    let valDesligada = Math.max(0, item.desligada) / SEGUNDOS_DIA;
+
+    let horarioInicioStr = horarioInicioAnterior;
+    if (item.horarioInicio) {
+      let horaObj = new Date(item.horarioInicio);
+      if (!isNaN(horaObj.getTime())) {
+        horarioInicioStr = Utilities.formatDate(horaObj, ss.getSpreadsheetTimeZone(), "HH:mm:ss");
+      }
+    }
+
+    if(item.listaStop3.length > 0) item.listaStop3.sort((a,b) => b.s - a.s);
+    if(item.listaStop10.length > 0) item.listaStop10.sort((a,b) => b.s - a.s);
+    if(item.listaStop20.length > 0) item.listaStop20.sort((a,b) => b.s - a.s);
+    if(item.listaStop30.length > 0) item.listaStop30.sort((a,b) => b.s - a.s);
+
+    rowFinal = [
+       item.maquina, item.turno, item.data, valLigada, valDesligada,
+       formatarListaTempos(item.listaStop3), formatarListaTempos(item.listaStop10), formatarListaTempos(item.listaStop20), formatarListaTempos(item.listaStop30),
+       custoMO, manual.motivo, manual.servico, manual.pecas, manual.custoPecas, manual.obs, horarioInicioStr
+    ];
     
     linhasSaida.push(rowFinal);
     delete mapaPainelExistente[chave];
