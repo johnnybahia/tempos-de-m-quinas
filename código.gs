@@ -228,29 +228,40 @@ function buscarDadosTempoReal() {
                var fimEvento = fullDateReg.getTime();
                var inicioEvento = fimEvento - (duracao * 1000);
 
-               // Calcular início e fim do turno atual
-               var dataInicioTurnoEvento = new Date(dataProdReg);
-               var horaInicioTurnoEvento = new Date(infoTurnoReg.inicio);
-               dataInicioTurnoEvento.setHours(horaInicioTurnoEvento.getHours(), horaInicioTurnoEvento.getMinutes(), horaInicioTurnoEvento.getSeconds(), 0);
-
-               var dataFimTurnoEvento = new Date(dataProdReg);
-               var horaFimTurnoEvento = new Date(infoTurnoReg.fim);
-               dataFimTurnoEvento.setHours(horaFimTurnoEvento.getHours(), horaFimTurnoEvento.getMinutes(), horaFimTurnoEvento.getSeconds(), 0);
-
-               // Se turno cruza meia-noite, ajustar data de fim
-               if (infoTurnoReg.cruzaMeiaNoite) {
-                 dataFimTurnoEvento.setDate(dataFimTurnoEvento.getDate() + 1);
+               // Buscar configuração do turno para pegar horários de início e fim
+               var configMaq = configTurnos[maquina];
+               var turnoConfig = null;
+               if (configMaq) {
+                 turnoConfig = configMaq.find(function(t) { return t.nome === infoTurnoReg.nome; });
                }
 
-               var inicioTurno = dataInicioTurnoEvento.getTime();
-               var fimTurno = dataFimTurnoEvento.getTime();
+               var duracaoClampada = duracao; // Por padrão, usar duração original
 
-               // Clampar o evento para os limites do turno
-               var inicioEfetivo = Math.max(inicioEvento, inicioTurno);
-               var fimEfetivo = Math.min(fimEvento, fimTurno);
+               if (turnoConfig && turnoConfig.inicio && turnoConfig.fim) {
+                 // Calcular início e fim do turno atual
+                 var dataInicioTurnoEvento = new Date(dataProdReg);
+                 var horaInicioTurnoEvento = new Date(turnoConfig.inicio);
+                 dataInicioTurnoEvento.setHours(horaInicioTurnoEvento.getHours(), horaInicioTurnoEvento.getMinutes(), horaInicioTurnoEvento.getSeconds(), 0);
 
-               // Calcular duração clampada (em segundos)
-               var duracaoClampada = Math.max(0, Math.floor((fimEfetivo - inicioEfetivo) / 1000));
+                 var dataFimTurnoEvento = new Date(dataProdReg);
+                 var horaFimTurnoEvento = new Date(turnoConfig.fim);
+                 dataFimTurnoEvento.setHours(horaFimTurnoEvento.getHours(), horaFimTurnoEvento.getMinutes(), horaFimTurnoEvento.getSeconds(), 0);
+
+                 // Se turno cruza meia-noite, ajustar data de fim
+                 if (infoTurnoReg.cruzaMeiaNoite) {
+                   dataFimTurnoEvento.setDate(dataFimTurnoEvento.getDate() + 1);
+                 }
+
+                 var inicioTurno = dataInicioTurnoEvento.getTime();
+                 var fimTurno = dataFimTurnoEvento.getTime();
+
+                 // Clampar o evento para os limites do turno
+                 var inicioEfetivo = Math.max(inicioEvento, inicioTurno);
+                 var fimEfetivo = Math.min(fimEvento, fimTurno);
+
+                 // Calcular duração clampada (em segundos)
+                 duracaoClampada = Math.max(0, Math.floor((fimEfetivo - inicioEfetivo) / 1000));
+               }
 
                if (linha[3] === "TEMPO PRODUZINDO") ref.totalProduzindo += duracaoClampada;
                else if (linha[3] === "TEMPO PARADA") ref.totalParada += duracaoClampada;
