@@ -1389,3 +1389,46 @@ function FORCAR_AUTORIZACAO() {
   var quota = MailApp.getRemainingDailyQuota();
   Logger.log("Cota restante: " + quota);
 }
+
+// FUNÇÃO DE TESTE - Execute esta função para verificar se as metas estão sendo lidas
+function testarLeituraMetas() {
+  const ss = getSS();
+  const sheetTurnos = ss.getSheetByName("TURNOS");
+
+  if (!sheetTurnos) {
+    Logger.log("❌ ERRO: Aba TURNOS não encontrada!");
+    return;
+  }
+
+  const dadosTurnos = sheetTurnos.getDataRange().getValues();
+  Logger.log("📋 Total de linhas na aba TURNOS: " + dadosTurnos.length);
+
+  // Mostrar cabeçalho
+  Logger.log("\n🔤 CABEÇALHO (linha 1):");
+  Logger.log("Coluna A: " + dadosTurnos[0][0]);
+  Logger.log("Coluna B: " + dadosTurnos[0][1]);
+  Logger.log("Coluna C: " + dadosTurnos[0][2]);
+  Logger.log("Coluna H: " + dadosTurnos[0][7]);
+  Logger.log("Coluna I: " + dadosTurnos[0][8]);
+  Logger.log("Coluna J: " + dadosTurnos[0][9]);
+
+  // Ler metas de cada máquina
+  Logger.log("\n🎯 METAS LIDAS:");
+  for (let i = 1; i < dadosTurnos.length && i < 5; i++) {
+    const maquina = String(dadosTurnos[i][0]).trim();
+    const metaT1 = dadosTurnos[i][7];
+    const metaT2 = dadosTurnos[i][8];
+    const metaT3 = dadosTurnos[i][9];
+
+    Logger.log("\n--- Máquina: " + maquina);
+    Logger.log("    Coluna H (META T1) - Valor bruto: " + metaT1 + " | Tipo: " + typeof metaT1);
+    Logger.log("    Coluna I (META T2) - Valor bruto: " + metaT2 + " | Tipo: " + typeof metaT2);
+    Logger.log("    Coluna J (META T3) - Valor bruto: " + metaT3 + " | Tipo: " + typeof metaT3);
+    Logger.log("    Após parseFloat:");
+    Logger.log("      META T1: " + (parseFloat(metaT1) || 0));
+    Logger.log("      META T2: " + (parseFloat(metaT2) || 0));
+    Logger.log("      META T3: " + (parseFloat(metaT3) || 0));
+  }
+
+  Logger.log("\n✅ Teste concluído! Verifique os logs acima.");
+}
