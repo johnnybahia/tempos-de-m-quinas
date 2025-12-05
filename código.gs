@@ -1471,6 +1471,148 @@ function DEBUG_espuladeira_torre_4_bocas() {
   debugarCalculosMaquina("espuladeira torre 4 bocas");
 }
 
+// Função para listar todas as máquinas e suas configurações de turno
+function DEBUG_listar_maquinas_e_turnos() {
+  try {
+    const ss = getSS();
+    const timezone = ss.getSpreadsheetTimeZone();
+
+    Logger.log("📋 ========================================");
+    Logger.log("📋 MÁQUINAS CONFIGURADAS NA ABA TURNOS");
+    Logger.log("📋 ========================================\n");
+
+    const sheetTurnos = ss.getSheetByName("TURNOS");
+    if (!sheetTurnos) {
+      Logger.log("❌ Aba TURNOS não encontrada!");
+      return;
+    }
+
+    const dadosTurnos = sheetTurnos.getDataRange().getValues();
+    Logger.log("Total de linhas: " + dadosTurnos.length + "\n");
+
+    // Listar todas as máquinas
+    for (let i = 1; i < dadosTurnos.length; i++) {
+      const maquina = String(dadosTurnos[i][0]).trim();
+      if (!maquina) continue;
+
+      Logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      Logger.log("🔧 Máquina: [" + maquina + "]");
+      Logger.log("   Comprimento do nome: " + maquina.length + " caracteres");
+      Logger.log("   Nome em código: " + JSON.stringify(maquina));
+      Logger.log("");
+
+      // Turno 1
+      if (dadosTurnos[i][1] && dadosTurnos[i][2]) {
+        const t1Inicio = new Date(dadosTurnos[i][1]);
+        const t1Fim = new Date(dadosTurnos[i][2]);
+        Logger.log("   Turno 1: " +
+                   Utilities.formatDate(t1Inicio, timezone, "HH:mm") + " - " +
+                   Utilities.formatDate(t1Fim, timezone, "HH:mm"));
+      } else {
+        Logger.log("   Turno 1: NÃO CONFIGURADO");
+      }
+
+      // Turno 2
+      if (dadosTurnos[i][3] && dadosTurnos[i][4]) {
+        const t2Inicio = new Date(dadosTurnos[i][3]);
+        const t2Fim = new Date(dadosTurnos[i][4]);
+        Logger.log("   Turno 2: " +
+                   Utilities.formatDate(t2Inicio, timezone, "HH:mm") + " - " +
+                   Utilities.formatDate(t2Fim, timezone, "HH:mm"));
+      } else {
+        Logger.log("   Turno 2: NÃO CONFIGURADO");
+      }
+
+      // Turno 3
+      if (dadosTurnos[i][5] && dadosTurnos[i][6]) {
+        const t3Inicio = new Date(dadosTurnos[i][5]);
+        const t3Fim = new Date(dadosTurnos[i][6]);
+        Logger.log("   Turno 3: " +
+                   Utilities.formatDate(t3Inicio, timezone, "HH:mm") + " - " +
+                   Utilities.formatDate(t3Fim, timezone, "HH:mm"));
+      } else {
+        Logger.log("   Turno 3: NÃO CONFIGURADO");
+      }
+
+      Logger.log("");
+    }
+
+    Logger.log("\n📋 ========================================");
+    Logger.log("📋 MÁQUINAS NA PÁGINA1 (ÚLTIMOS REGISTROS)");
+    Logger.log("📋 ========================================\n");
+
+    const sheetPagina1 = ss.getSheetByName("Página1");
+    if (!sheetPagina1) {
+      Logger.log("❌ Aba Página1 não encontrada!");
+      return;
+    }
+
+    const dadosPagina1 = sheetPagina1.getDataRange().getValues();
+    const maquinasEncontradas = new Set();
+
+    // Pegar últimas 100 linhas
+    const inicio = Math.max(1, dadosPagina1.length - 100);
+    for (let i = inicio; i < dadosPagina1.length; i++) {
+      const maquina = String(dadosPagina1[i][2]).trim();
+      if (maquina) maquinasEncontradas.add(maquina);
+    }
+
+    Array.from(maquinasEncontradas).sort().forEach(maq => {
+      Logger.log("🔧 [" + maq + "]");
+      Logger.log("   Comprimento: " + maq.length + " caracteres");
+      Logger.log("   Código: " + JSON.stringify(maq));
+      Logger.log("");
+    });
+
+    Logger.log("\n🔍 ========================================");
+    Logger.log("🔍 BUSCAR MÁQUINA ESPECÍFICA");
+    Logger.log("🔍 ========================================\n");
+
+    const buscar = "espuladeira torre 4 bocas";
+    Logger.log("Buscando por: [" + buscar + "]");
+    Logger.log("");
+
+    // Buscar na TURNOS
+    let encontrouTurnos = false;
+    for (let i = 1; i < dadosTurnos.length; i++) {
+      const maquina = String(dadosTurnos[i][0]).trim();
+      if (maquina.toLowerCase().includes(buscar.toLowerCase()) ||
+          buscar.toLowerCase().includes(maquina.toLowerCase())) {
+        Logger.log("✅ Encontrado na TURNOS (linha " + (i+1) + "): [" + maquina + "]");
+        encontrouTurnos = true;
+      }
+    }
+    if (!encontrouTurnos) {
+      Logger.log("❌ NÃO encontrado na aba TURNOS");
+    }
+
+    // Buscar na Página1
+    Logger.log("");
+    let encontrouPagina1 = false;
+    for (let i = inicio; i < dadosPagina1.length; i++) {
+      const maquina = String(dadosPagina1[i][2]).trim();
+      if (maquina.toLowerCase().includes(buscar.toLowerCase()) ||
+          buscar.toLowerCase().includes(maquina.toLowerCase())) {
+        if (!encontrouPagina1) {
+          Logger.log("✅ Encontrado na Página1:");
+          encontrouPagina1 = true;
+        }
+        Logger.log("   Linha " + (i+1) + ": [" + maquina + "]");
+        if (encontrouPagina1) break; // Mostrar só o primeiro
+      }
+    }
+    if (!encontrouPagina1) {
+      Logger.log("❌ NÃO encontrado na Página1 (últimos 100 registros)");
+    }
+
+    Logger.log("\n✅ Listagem concluída!");
+
+  } catch (error) {
+    Logger.log("❌ ERRO: " + error.message);
+    Logger.log(error.stack);
+  }
+}
+
 function debugarCalculosMaquina(nomeMaquina) {
   try {
     Logger.log("🔍 ========================================");
