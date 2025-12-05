@@ -222,12 +222,42 @@ function buscarDadosTempoReal() {
 
             if (dataProdReg.getTime() === ref.refDataProducao) {
                var duracao = parseDuration(linha[4]);
-               if (linha[3] === "TEMPO PRODUZINDO") ref.totalProduzindo += duracao;
-               else if (linha[3] === "TEMPO PARADA") ref.totalParada += duracao;
+
+               // CLAMPAR duração para que só conte a parte do evento que está DENTRO do turno
+               // Isso corrige o bug de eventos que cruzam turnos (ex: evento que começa no Turno 3 e termina no Turno 1)
+               var fimEvento = fullDateReg.getTime();
+               var inicioEvento = fimEvento - (duracao * 1000);
+
+               // Calcular início e fim do turno atual
+               var dataInicioTurnoEvento = new Date(dataProdReg);
+               var horaInicioTurnoEvento = new Date(infoTurnoReg.inicio);
+               dataInicioTurnoEvento.setHours(horaInicioTurnoEvento.getHours(), horaInicioTurnoEvento.getMinutes(), horaInicioTurnoEvento.getSeconds(), 0);
+
+               var dataFimTurnoEvento = new Date(dataProdReg);
+               var horaFimTurnoEvento = new Date(infoTurnoReg.fim);
+               dataFimTurnoEvento.setHours(horaFimTurnoEvento.getHours(), horaFimTurnoEvento.getMinutes(), horaFimTurnoEvento.getSeconds(), 0);
+
+               // Se turno cruza meia-noite, ajustar data de fim
+               if (infoTurnoReg.cruzaMeiaNoite) {
+                 dataFimTurnoEvento.setDate(dataFimTurnoEvento.getDate() + 1);
+               }
+
+               var inicioTurno = dataInicioTurnoEvento.getTime();
+               var fimTurno = dataFimTurnoEvento.getTime();
+
+               // Clampar o evento para os limites do turno
+               var inicioEfetivo = Math.max(inicioEvento, inicioTurno);
+               var fimEfetivo = Math.min(fimEvento, fimTurno);
+
+               // Calcular duração clampada (em segundos)
+               var duracaoClampada = Math.max(0, Math.floor((fimEfetivo - inicioEfetivo) / 1000));
+
+               if (linha[3] === "TEMPO PRODUZINDO") ref.totalProduzindo += duracaoClampada;
+               else if (linha[3] === "TEMPO PARADA") ref.totalParada += duracaoClampada;
 
                // Rastrear primeiro evento (loop vai de trás pra frente, então sempre sobrescreve)
                ref.primeiraHora = fullDateReg;
-               ref.primeiraDuracao = duracao;
+               ref.primeiraDuracao = duracaoClampada;
             }
           }
         }
@@ -291,7 +321,12 @@ function buscarDadosTempoReal() {
               if (!isNaN(horaPrimeiroRegistro.getTime())) {
                 // Calcular o início efetivo do evento (subtraindo a duração)
                 var inicioEfetivoEvento = new Date(horaPrimeiroRegistro.getTime() - (info.primeiraDuracao * 1000));
-                var diferencaSegundos = Math.floor((inicioEfetivoEvento.getTime() - dataInicioTurno.getTime()) / 1000);
+
+                // CLAMPAR: Se o evento começou antes do turno, considerar que começou no início do turno
+                // Isso evita gap negativo quando eventos cruzam turnos
+                var inicioEfetivoClampado = Math.max(inicioEfetivoEvento.getTime(), dataInicioTurno.getTime());
+
+                var diferencaSegundos = Math.floor((inicioEfetivoClampado - dataInicioTurno.getTime()) / 1000);
 
                 // Se há gap de mais de 60 segundos, adicionar como parada
                 if (diferencaSegundos >= 60) {
