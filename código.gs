@@ -97,20 +97,28 @@ function buscarDadosTempoReal() {
     var sheetTurnos = ss.getSheetByName("TURNOS");
     var dadosTurnos = sheetTurnos ? sheetTurnos.getDataRange().getValues() : [];
     var configTurnos = {};
+    var mapaMetas = {};
 
     for (var i = 1; i < dadosTurnos.length; i++) {
       if (dadosTurnos[i][0]) {
-        configTurnos[String(dadosTurnos[i][0]).trim()] = [
+        var maqNome = String(dadosTurnos[i][0]).trim();
+        configTurnos[maqNome] = [
            { nome: "Turno 1", inicio: dadosTurnos[i][1], fim: dadosTurnos[i][2] },
            { nome: "Turno 2", inicio: dadosTurnos[i][3], fim: dadosTurnos[i][4] },
            { nome: "Turno 3", inicio: dadosTurnos[i][5], fim: dadosTurnos[i][6] }
         ];
+
+        // Ler metas por turno da aba TURNOS (colunas H, I, J = índices 7, 8, 9)
+        mapaMetas[maqNome] = {
+          "Turno 1": parseFloat(dadosTurnos[i][7]) || 0,
+          "Turno 2": parseFloat(dadosTurnos[i][8]) || 0,
+          "Turno 3": parseFloat(dadosTurnos[i][9]) || 0
+        };
       }
     }
 
     var sheetDadosConfig = ss.getSheetByName("DADOS");
     var mapaFamilias = {};
-    var mapaMetas = {};
 
     if (sheetDadosConfig) {
       var dConfig = sheetDadosConfig.getDataRange().getValues();
@@ -118,21 +126,11 @@ function buscarDadosTempoReal() {
         var h = dConfig[0].map(function(c) { return String(c).toUpperCase().trim(); });
         var idxM = h.indexOf("MÁQUINAS");
         var idxF = h.findIndex(function(x) { return x.includes("FAMÍLIA") || x.includes("FAMILIA"); });
-        var idxMetaT1 = h.indexOf("META TURNO 1");
-        var idxMetaT2 = h.indexOf("META TURNO 2");
-        var idxMetaT3 = h.indexOf("META TURNO 3");
 
         if (idxM > -1 && idxF > -1) {
           for (var i = 1; i < dConfig.length; i++) {
             var m = String(dConfig[i][idxM]).trim();
             mapaFamilias[m] = dConfig[i][idxF] || "GERAL";
-
-            // Ler metas por turno (em horas)
-            mapaMetas[m] = {
-              "Turno 1": idxMetaT1 > -1 ? (parseFloat(dConfig[i][idxMetaT1]) || 0) : 0,
-              "Turno 2": idxMetaT2 > -1 ? (parseFloat(dConfig[i][idxMetaT2]) || 0) : 0,
-              "Turno 3": idxMetaT3 > -1 ? (parseFloat(dConfig[i][idxMetaT3]) || 0) : 0
-            };
           }
         }
       }
@@ -335,28 +333,18 @@ function buscarDadosGrafico(maquinaNome) {
   const output = { "Turno 1": [], "Turno 2": [], "Turno 3": [] };
   const mapIndices = {};
 
-  // Buscar metas da máquina na aba DADOS
-  const sheetDados = ss.getSheetByName("DADOS");
+  // Buscar metas da máquina na aba TURNOS (colunas H, I, J = índices 7, 8, 9)
+  const sheetTurnos = ss.getSheetByName("TURNOS");
   let metaTurno1 = 0, metaTurno2 = 0, metaTurno3 = 0;
 
-  if (sheetDados) {
-    const dadosConfig = sheetDados.getDataRange().getValues();
-    if (dadosConfig.length > 0) {
-      const headers = dadosConfig[0].map(c => String(c).toUpperCase().trim());
-      const idxMaq = headers.indexOf("MÁQUINAS");
-      const idxMetaT1 = headers.indexOf("META TURNO 1");
-      const idxMetaT2 = headers.indexOf("META TURNO 2");
-      const idxMetaT3 = headers.indexOf("META TURNO 3");
-
-      if (idxMaq > -1) {
-        for (let i = 1; i < dadosConfig.length; i++) {
-          if (String(dadosConfig[i][idxMaq]).trim() === maquinaNome) {
-            metaTurno1 = idxMetaT1 > -1 ? (parseFloat(dadosConfig[i][idxMetaT1]) || 0) : 0;
-            metaTurno2 = idxMetaT2 > -1 ? (parseFloat(dadosConfig[i][idxMetaT2]) || 0) : 0;
-            metaTurno3 = idxMetaT3 > -1 ? (parseFloat(dadosConfig[i][idxMetaT3]) || 0) : 0;
-            break;
-          }
-        }
+  if (sheetTurnos) {
+    const dadosTurnos = sheetTurnos.getDataRange().getValues();
+    for (let i = 1; i < dadosTurnos.length; i++) {
+      if (String(dadosTurnos[i][0]).trim() === maquinaNome) {
+        metaTurno1 = parseFloat(dadosTurnos[i][7]) || 0;
+        metaTurno2 = parseFloat(dadosTurnos[i][8]) || 0;
+        metaTurno3 = parseFloat(dadosTurnos[i][9]) || 0;
+        break;
       }
     }
   }
