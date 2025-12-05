@@ -110,6 +110,7 @@ function buscarDadosTempoReal() {
 
     var sheetDadosConfig = ss.getSheetByName("DADOS");
     var mapaFamilias = {};
+    var mapaMetas = {};
 
     if (sheetDadosConfig) {
       var dConfig = sheetDadosConfig.getDataRange().getValues();
@@ -117,11 +118,21 @@ function buscarDadosTempoReal() {
         var h = dConfig[0].map(function(c) { return String(c).toUpperCase().trim(); });
         var idxM = h.indexOf("MÁQUINAS");
         var idxF = h.findIndex(function(x) { return x.includes("FAMÍLIA") || x.includes("FAMILIA"); });
+        var idxMetaT1 = h.indexOf("META TURNO 1");
+        var idxMetaT2 = h.indexOf("META TURNO 2");
+        var idxMetaT3 = h.indexOf("META TURNO 3");
 
         if (idxM > -1 && idxF > -1) {
           for (var i = 1; i < dConfig.length; i++) {
             var m = String(dConfig[i][idxM]).trim();
             mapaFamilias[m] = dConfig[i][idxF] || "GERAL";
+
+            // Ler metas por turno (em horas)
+            mapaMetas[m] = {
+              "Turno 1": idxMetaT1 > -1 ? (parseFloat(dConfig[i][idxMetaT1]) || 0) : 0,
+              "Turno 2": idxMetaT2 > -1 ? (parseFloat(dConfig[i][idxMetaT2]) || 0) : 0,
+              "Turno 3": idxMetaT3 > -1 ? (parseFloat(dConfig[i][idxMetaT3]) || 0) : 0
+            };
           }
         }
       }
@@ -178,7 +189,11 @@ function buscarDadosTempoReal() {
           refDataProducao: dataProducaoAtual ? dataProducaoAtual.getTime() : null,
           horarioInicio: "",
           primeiraHora: null,
-          primeiraDuracao: 0
+          primeiraDuracao: 0,
+          metaTurno1: mapaMetas[maquina] ? mapaMetas[maquina]["Turno 1"] : 0,
+          metaTurno2: mapaMetas[maquina] ? mapaMetas[maquina]["Turno 2"] : 0,
+          metaTurno3: mapaMetas[maquina] ? mapaMetas[maquina]["Turno 3"] : 0,
+          metaTurnoAtual: mapaMetas[maquina] && mapaMetas[maquina][nomeTurnoAtual] ? mapaMetas[maquina][nomeTurnoAtual] : 0
         };
       }
       
@@ -320,6 +335,32 @@ function buscarDadosGrafico(maquinaNome) {
   const output = { "Turno 1": [], "Turno 2": [], "Turno 3": [] };
   const mapIndices = {};
 
+  // Buscar metas da máquina na aba DADOS
+  const sheetDados = ss.getSheetByName("DADOS");
+  let metaTurno1 = 0, metaTurno2 = 0, metaTurno3 = 0;
+
+  if (sheetDados) {
+    const dadosConfig = sheetDados.getDataRange().getValues();
+    if (dadosConfig.length > 0) {
+      const headers = dadosConfig[0].map(c => String(c).toUpperCase().trim());
+      const idxMaq = headers.indexOf("MÁQUINAS");
+      const idxMetaT1 = headers.indexOf("META TURNO 1");
+      const idxMetaT2 = headers.indexOf("META TURNO 2");
+      const idxMetaT3 = headers.indexOf("META TURNO 3");
+
+      if (idxMaq > -1) {
+        for (let i = 1; i < dadosConfig.length; i++) {
+          if (String(dadosConfig[i][idxMaq]).trim() === maquinaNome) {
+            metaTurno1 = idxMetaT1 > -1 ? (parseFloat(dadosConfig[i][idxMetaT1]) || 0) : 0;
+            metaTurno2 = idxMetaT2 > -1 ? (parseFloat(dadosConfig[i][idxMetaT2]) || 0) : 0;
+            metaTurno3 = idxMetaT3 > -1 ? (parseFloat(dadosConfig[i][idxMetaT3]) || 0) : 0;
+            break;
+          }
+        }
+      }
+    }
+  }
+
   // Criar array de dias dos últimos 30 dias
   let idx = 0;
   for (let d = new Date(dataLimite); d <= hoje; d.setDate(d.getDate() + 1)) {
@@ -369,7 +410,10 @@ function buscarDadosGrafico(maquinaNome) {
     t1: output["Turno 1"],
     t2: output["Turno 2"],
     t3: output["Turno 3"],
-    maquina: maquinaNome
+    maquina: maquinaNome,
+    metaTurno1: metaTurno1,
+    metaTurno2: metaTurno2,
+    metaTurno3: metaTurno3
   };
 }
 

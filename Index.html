@@ -373,7 +373,17 @@
                   🕐 Início turno: ${maq.horarioInicio}
                 </div>`;
               }
-              
+
+              // Exibir meta do turno atual se disponível
+              let metaTurnoHTML = '';
+              if (maq.metaTurnoAtual && maq.metaTurnoAtual > 0) {
+                const metaFormatada = maq.metaTurnoAtual.toFixed(2);
+                const percentualAtingido = maq.totalProduzindo > 0 ? ((maq.totalProduzindo / 3600 / maq.metaTurnoAtual) * 100).toFixed(1) : 0;
+                metaTurnoHTML = `<div style="font-size:10px; color:#0066cc; text-align:center; margin-bottom:5px; font-weight:bold;">
+                  🎯 Meta ${maq.turnoAtual}: ${metaFormatada}h (${percentualAtingido}%)
+                </div>`;
+              }
+
               const ultimoEvento = new Date(maq.timestamp);
               const debugInfo = `Último: ${ultimoEvento.toLocaleTimeString('pt-BR')} - ${maq.ultimoEvento}`;
 
@@ -385,6 +395,7 @@
                   Desde: ${ultimoEvento.toLocaleTimeString('pt-BR')}
                 </div>
                 ${horarioInicioHTML}
+                ${metaTurnoHTML}
                 <div class="card-daily-totals">
                   <div class="daily-row"><span class="daily-val-prod">Produzindo: ${prodDia}</span></div>
                   <div class="daily-row"><span class="daily-val-stop">Parado: ${stopDia}</span></div>
@@ -471,37 +482,52 @@
       function renderizarGrafico(dados) {
         document.getElementById('grafico-loading').style.display = 'none';
         document.getElementById('charts-container').style.display = 'block';
-        
-        // Meta de 4:40 = 4 + 40/60 = 4.67 horas
-        const metaData = dados.labels.map(() => 4.67);
 
-        function criarChart(idCanvas, labels, dataValues, cor) {
+        function criarChart(idCanvas, labels, dataValues, cor, metaValor) {
            const ctx = document.getElementById(idCanvas).getContext('2d');
+
+           // Criar array de meta (linha horizontal) se meta > 0
+           const metaData = metaValor > 0 ? dados.labels.map(() => metaValor) : null;
+
+           // Formatar meta para exibição (HH:MM)
+           let metaLabel = '';
+           if (metaValor > 0) {
+             const horas = Math.floor(metaValor);
+             const minutos = Math.round((metaValor - horas) * 60);
+             metaLabel = `Meta (${horas.toString().padStart(2, '0')}:${minutos.toString().padStart(2, '0')})`;
+           }
+
+           const datasets = [
+               {
+                   type: 'bar',
+                   label: 'Horas Rodando',
+                   data: dataValues,
+                   backgroundColor: cor,
+                   borderColor: cor,
+                   borderWidth: 1,
+                   order: 2
+               }
+           ];
+
+           // Adicionar linha de meta se houver meta configurada
+           if (metaData) {
+             datasets.push({
+                 type: 'line',
+                 label: metaLabel,
+                 data: metaData,
+                 borderColor: '#FF0000',
+                 borderWidth: 2,
+                 borderDash: [5, 5],
+                 pointRadius: 0,
+                 tension: 0,
+                 order: 1
+             });
+           }
+
            return new Chart(ctx, {
                data: {
                    labels: labels,
-                   datasets: [
-                       {
-                           type: 'bar',
-                           label: 'Horas Rodando',
-                           data: dataValues,
-                           backgroundColor: cor,
-                           borderColor: cor,
-                           borderWidth: 1,
-                           order: 2
-                       },
-                       {
-                           type: 'line',
-                           label: 'Meta (04:40)',
-                           data: metaData,
-                           borderColor: '#FF0000', 
-                           borderWidth: 2,
-                           borderDash: [5, 5], 
-                           pointRadius: 0,
-                           tension: 0,
-                           order: 1
-                       }
-                   ]
+                   datasets: datasets
                },
                options: {
                    responsive: true,
@@ -545,9 +571,9 @@
         if(chart2) chart2.destroy();
         if(chart3) chart3.destroy();
 
-        chart1 = criarChart('chartT1', dados.labels, dados.t1, '#007bff'); 
-        chart2 = criarChart('chartT2', dados.labels, dados.t2, '#28a745'); 
-        chart3 = criarChart('chartT3', dados.labels, dados.t3, '#ffc107'); 
+        chart1 = criarChart('chartT1', dados.labels, dados.t1, '#007bff', dados.metaTurno1 || 0);
+        chart2 = criarChart('chartT2', dados.labels, dados.t2, '#28a745', dados.metaTurno2 || 0);
+        chart3 = criarChart('chartT3', dados.labels, dados.t3, '#ffc107', dados.metaTurno3 || 0); 
       }
       
       function preencherSelects(l) {
