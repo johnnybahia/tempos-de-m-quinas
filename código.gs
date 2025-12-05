@@ -1461,3 +1461,296 @@ function testarLeituraMetas() {
 
   Logger.log("\n✅ Teste concluído! Verifique os logs acima.");
 }
+
+// ==========================================================
+// FUNÇÃO DE DEBUG: Rastrear cálculos de tempo de uma máquina
+// ==========================================================
+
+function debugarCalculosMaquina(nomeMaquina) {
+  try {
+    Logger.log("🔍 ========================================");
+    Logger.log("🔍 DEBUG DE CÁLCULOS DE TEMPO");
+    Logger.log("🔍 Máquina: " + nomeMaquina);
+    Logger.log("🔍 ========================================\n");
+
+    const ss = getSS();
+    const sheet = ss.getSheetByName("Página1");
+    const dados = sheet ? sheet.getDataRange().getValues() : [];
+
+    if (dados.length <= 1) {
+      Logger.log("❌ Nenhum dado encontrado na Página1!");
+      return;
+    }
+
+    const agora = new Date();
+    const timezone = ss.getSpreadsheetTimeZone();
+
+    Logger.log("⏰ Hora atual: " + Utilities.formatDate(agora, timezone, "dd/MM/yyyy HH:mm:ss"));
+
+    // Ler configuração de turnos
+    const sheetTurnos = ss.getSheetByName("TURNOS");
+    const dadosTurnos = sheetTurnos ? sheetTurnos.getDataRange().getValues() : [];
+    const configTurnos = {};
+
+    for (let i = 1; i < dadosTurnos.length; i++) {
+      if (dadosTurnos[i][0]) {
+        const maqNome = String(dadosTurnos[i][0]).trim();
+        configTurnos[maqNome] = [
+           { nome: "Turno 1", inicio: dadosTurnos[i][1], fim: dadosTurnos[i][2] },
+           { nome: "Turno 2", inicio: dadosTurnos[i][3], fim: dadosTurnos[i][4] },
+           { nome: "Turno 3", inicio: dadosTurnos[i][5], fim: dadosTurnos[i][6] }
+        ];
+      }
+    }
+
+    // Descobrir turno atual
+    const infoTurnoAtual = descobrirTurnoCompleto(agora, nomeMaquina, configTurnos);
+    if (!infoTurnoAtual) {
+      Logger.log("❌ Máquina fora de turno no momento!");
+      return;
+    }
+
+    Logger.log("📋 Turno atual: " + infoTurnoAtual.nome);
+    Logger.log("   Horário do turno: " + Utilities.formatDate(new Date(infoTurnoAtual.inicio), timezone, "HH:mm") +
+               " até " + Utilities.formatDate(new Date(infoTurnoAtual.fim), timezone, "HH:mm"));
+    Logger.log("   Cruza meia-noite? " + (infoTurnoAtual.cruzaMeiaNoite ? "SIM" : "NÃO"));
+
+    // Calcular data de produção
+    let dataProducaoAtual = new Date(agora);
+    const horaAgora = agora.getHours();
+    const horaInicioPrimeiroTurno = obterHoraInicioPrimeiroTurno(nomeMaquina, configTurnos);
+
+    if (horaAgora < horaInicioPrimeiroTurno) {
+      dataProducaoAtual.setDate(dataProducaoAtual.getDate() - 1);
+    } else if (infoTurnoAtual.cruzaMeiaNoite && horaAgora < Math.floor(infoTurnoAtual.minInicio / 60)) {
+      dataProducaoAtual.setDate(dataProducaoAtual.getDate() - 1);
+    }
+    dataProducaoAtual.setHours(0,0,0,0);
+
+    Logger.log("📅 Data de produção calculada: " + Utilities.formatDate(dataProducaoAtual, timezone, "dd/MM/yyyy"));
+
+    // Calcular horário de início do turno
+    const turnoConfig = configTurnos[nomeMaquina].find(t => t.nome === infoTurnoAtual.nome);
+    const dataInicioTurno = new Date(dataProducaoAtual);
+    const horaInicioTurno = new Date(turnoConfig.inicio);
+    dataInicioTurno.setHours(horaInicioTurno.getHours(), horaInicioTurno.getMinutes(), horaInicioTurno.getSeconds(), 0);
+
+    Logger.log("🕐 Horário de início do turno: " + Utilities.formatDate(dataInicioTurno, timezone, "dd/MM/yyyy HH:mm:ss"));
+
+    const tempoDecorrido = Math.floor((agora.getTime() - dataInicioTurno.getTime()) / 1000);
+    const hDecorrido = Math.floor(tempoDecorrido / 3600);
+    const mDecorrido = Math.floor((tempoDecorrido % 3600) / 60);
+    const sDecorrido = tempoDecorrido % 60;
+
+    Logger.log("⏱️  Tempo decorrido desde início do turno: " +
+               hDecorrido.toString().padStart(2, '0') + ":" +
+               mDecorrido.toString().padStart(2, '0') + ":" +
+               sDecorrido.toString().padStart(2, '0'));
+
+    Logger.log("\n📊 ========================================");
+    Logger.log("📊 EVENTOS ENCONTRADOS NA PÁGINA1");
+    Logger.log("📊 ========================================\n");
+
+    let totalProduzindo = 0;
+    let totalParada = 0;
+    let primeiraHora = null;
+    let primeiraDuracao = 0;
+    let eventosProduzindo = [];
+    let eventosParada = [];
+    let eventosForaDoFiltro = [];
+
+    // Loop de trás pra frente (igual ao código original)
+    for (let i = dados.length - 1; i > 0; i--) {
+      const linha = dados[i];
+      const maquina = String(linha[2]).trim();
+
+      if (maquina !== nomeMaquina) continue;
+
+      const dataReg = lerDataBR(linha[0]);
+      const horaRegObj = new Date(linha[1]);
+
+      if (isNaN(dataReg.getTime()) || isNaN(horaRegObj.getTime())) {
+        Logger.log("⚠️  Linha " + (i+1) + ": Data/hora inválida - IGNORADO");
+        continue;
+      }
+
+      const fullDateReg = new Date(dataReg);
+      fullDateReg.setHours(horaRegObj.getHours(), horaRegObj.getMinutes(), horaRegObj.getSeconds());
+
+      const infoTurnoReg = descobrirTurnoCompleto(fullDateReg, nomeMaquina, configTurnos);
+
+      // Verificar se pertence ao turno atual
+      const pertenceTurnoAtual = infoTurnoReg && infoTurnoReg.nome === infoTurnoAtual.nome;
+
+      // Calcular data de produção do evento
+      let dataProdReg = new Date(dataReg);
+      const h = fullDateReg.getHours();
+
+      if (h < horaInicioPrimeiroTurno) {
+        dataProdReg.setDate(dataProdReg.getDate() - 1);
+      } else if (infoTurnoReg && infoTurnoReg.cruzaMeiaNoite && h < Math.floor(infoTurnoReg.minInicio / 60)) {
+        dataProdReg.setDate(dataProdReg.getDate() - 1);
+      }
+
+      dataProdReg.setHours(0,0,0,0);
+
+      const pertenceDataProducao = dataProdReg.getTime() === dataProducaoAtual.getTime();
+
+      const duracao = parseDuration(linha[4]);
+      const evento = linha[3];
+
+      const eventoInfo = {
+        linha: i + 1,
+        dataHora: Utilities.formatDate(fullDateReg, timezone, "dd/MM/yyyy HH:mm:ss"),
+        evento: evento,
+        duracao: linha[4],
+        duracaoSegundos: duracao,
+        turno: infoTurnoReg ? infoTurnoReg.nome : "SEM TURNO",
+        dataProducao: Utilities.formatDate(dataProdReg, timezone, "dd/MM/yyyy"),
+        pertenceTurnoAtual: pertenceTurnoAtual,
+        pertenceDataProducao: pertenceDataProducao
+      };
+
+      // Se pertence ao turno e data corretos, somar
+      if (pertenceTurnoAtual && pertenceDataProducao) {
+        if (evento === "TEMPO PRODUZINDO") {
+          totalProduzindo += duracao;
+          eventosProduzindo.push(eventoInfo);
+        } else if (evento === "TEMPO PARADA") {
+          totalParada += duracao;
+          eventosParada.push(eventoInfo);
+        }
+
+        // Rastrear primeiro evento (loop vai de trás pra frente)
+        primeiraHora = fullDateReg;
+        primeiraDuracao = duracao;
+      } else {
+        eventosForaDoFiltro.push(eventoInfo);
+      }
+    }
+
+    // Mostrar eventos PRODUZINDO
+    Logger.log("🟢 EVENTOS PRODUZINDO (" + eventosProduzindo.length + " eventos):");
+    if (eventosProduzindo.length === 0) {
+      Logger.log("   (nenhum)");
+    } else {
+      eventosProduzindo.reverse().forEach((evt, idx) => {
+        Logger.log("   " + (idx+1) + ". [Linha " + evt.linha + "] " + evt.dataHora + " | Duração: " + evt.duracao + " (" + evt.duracaoSegundos + "s)");
+      });
+      const hP = Math.floor(totalProduzindo / 3600);
+      const mP = Math.floor((totalProduzindo % 3600) / 60);
+      const sP = totalProduzindo % 60;
+      Logger.log("   ➡️  TOTAL PRODUZINDO: " + hP.toString().padStart(2, '0') + ":" + mP.toString().padStart(2, '0') + ":" + sP.toString().padStart(2, '0') + " (" + totalProduzindo + "s)");
+    }
+
+    Logger.log("\n🔴 EVENTOS PARADA (" + eventosParada.length + " eventos):");
+    if (eventosParada.length === 0) {
+      Logger.log("   (nenhum)");
+    } else {
+      eventosParada.reverse().forEach((evt, idx) => {
+        Logger.log("   " + (idx+1) + ". [Linha " + evt.linha + "] " + evt.dataHora + " | Duração: " + evt.duracao + " (" + evt.duracaoSegundos + "s)");
+      });
+      const hPa = Math.floor(totalParada / 3600);
+      const mPa = Math.floor((totalParada % 3600) / 60);
+      const sPa = totalParada % 60;
+      Logger.log("   ➡️  TOTAL PARADA (antes do gap): " + hPa.toString().padStart(2, '0') + ":" + mPa.toString().padStart(2, '0') + ":" + sPa.toString().padStart(2, '0') + " (" + totalParada + "s)");
+    }
+
+    // Calcular gap inicial
+    Logger.log("\n📐 ========================================");
+    Logger.log("📐 CÁLCULO DO GAP INICIAL");
+    Logger.log("📐 ========================================\n");
+
+    if (primeiraHora) {
+      Logger.log("🕐 Primeiro evento registrado: " + Utilities.formatDate(primeiraHora, timezone, "dd/MM/yyyy HH:mm:ss"));
+      Logger.log("⏱️  Duração do primeiro evento: " + primeiraDuracao + "s");
+
+      const inicioEfetivoEvento = new Date(primeiraHora.getTime() - (primeiraDuracao * 1000));
+      Logger.log("🔙 Início efetivo do evento: " + Utilities.formatDate(inicioEfetivoEvento, timezone, "dd/MM/yyyy HH:mm:ss"));
+      Logger.log("🕐 Início do turno: " + Utilities.formatDate(dataInicioTurno, timezone, "dd/MM/yyyy HH:mm:ss"));
+
+      const diferencaSegundos = Math.floor((inicioEfetivoEvento.getTime() - dataInicioTurno.getTime()) / 1000);
+
+      Logger.log("📊 Gap calculado: " + diferencaSegundos + "s");
+
+      if (diferencaSegundos >= 60) {
+        totalParada += diferencaSegundos;
+        const hGap = Math.floor(diferencaSegundos / 3600);
+        const mGap = Math.floor((diferencaSegundos % 3600) / 60);
+        const sGap = diferencaSegundos % 60;
+        Logger.log("✅ Gap >= 60s: ADICIONADO ao tempo parado");
+        Logger.log("   Gap: " + hGap.toString().padStart(2, '0') + ":" + mGap.toString().padStart(2, '0') + ":" + sGap.toString().padStart(2, '0'));
+      } else {
+        Logger.log("⚠️  Gap < 60s: NÃO adicionado");
+      }
+    } else {
+      Logger.log("⚠️  Nenhum evento encontrado para calcular gap!");
+    }
+
+    // TOTAIS FINAIS
+    Logger.log("\n🏁 ========================================");
+    Logger.log("🏁 TOTAIS FINAIS");
+    Logger.log("🏁 ========================================\n");
+
+    const hProd = Math.floor(totalProduzindo / 3600);
+    const mProd = Math.floor((totalProduzindo % 3600) / 60);
+    const sProd = totalProduzindo % 60;
+
+    const hPar = Math.floor(totalParada / 3600);
+    const mPar = Math.floor((totalParada % 3600) / 60);
+    const sPar = totalParada % 60;
+
+    const totalGeral = totalProduzindo + totalParada;
+    const hGeral = Math.floor(totalGeral / 3600);
+    const mGeral = Math.floor((totalGeral % 3600) / 60);
+    const sGeral = totalGeral % 60;
+
+    Logger.log("🟢 PRODUZINDO: " + hProd.toString().padStart(2, '0') + ":" + mProd.toString().padStart(2, '0') + ":" + sProd.toString().padStart(2, '0') + " (" + totalProduzindo + "s)");
+    Logger.log("🔴 PARADO:     " + hPar.toString().padStart(2, '0') + ":" + mPar.toString().padStart(2, '0') + ":" + sPar.toString().padStart(2, '0') + " (" + totalParada + "s)");
+    Logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    Logger.log("📊 TOTAL:      " + hGeral.toString().padStart(2, '0') + ":" + mGeral.toString().padStart(2, '0') + ":" + sGeral.toString().padStart(2, '0') + " (" + totalGeral + "s)");
+    Logger.log("");
+    Logger.log("⏱️  ESPERADO:   " + hDecorrido.toString().padStart(2, '0') + ":" + mDecorrido.toString().padStart(2, '0') + ":" + sDecorrido.toString().padStart(2, '0') + " (" + tempoDecorrido + "s)");
+
+    const diferenca = totalGeral - tempoDecorrido;
+    const difAbs = Math.abs(diferenca);
+    const hDif = Math.floor(difAbs / 3600);
+    const mDif = Math.floor((difAbs % 3600) / 60);
+    const sDif = difAbs % 60;
+
+    if (Math.abs(diferenca) > 60) {
+      Logger.log("");
+      Logger.log("❌ DIFERENÇA:  " + (diferenca > 0 ? "+" : "-") + hDif.toString().padStart(2, '0') + ":" + mDif.toString().padStart(2, '0') + ":" + sDif.toString().padStart(2, '0') + " (" + diferenca + "s)");
+      Logger.log("❌ ERRO DETECTADO! Total não bate com tempo decorrido!");
+    } else {
+      Logger.log("✅ Total correto!");
+    }
+
+    // Mostrar eventos fora do filtro (se houver)
+    if (eventosForaDoFiltro.length > 0) {
+      Logger.log("\n⚠️  ========================================");
+      Logger.log("⚠️  EVENTOS IGNORADOS (fora do filtro)");
+      Logger.log("⚠️  Total: " + eventosForaDoFiltro.length + " eventos");
+      Logger.log("⚠️  ========================================\n");
+
+      eventosForaDoFiltro.slice(0, 10).forEach((evt, idx) => {
+        Logger.log("   " + (idx+1) + ". [Linha " + evt.linha + "] " + evt.dataHora);
+        Logger.log("      Evento: " + evt.evento + " | Duração: " + evt.duracao);
+        Logger.log("      Turno do evento: " + evt.turno + " | Data produção: " + evt.dataProducao);
+        Logger.log("      Pertence turno atual? " + (evt.pertenceTurnoAtual ? "SIM" : "NÃO"));
+        Logger.log("      Pertence data produção? " + (evt.pertenceDataProducao ? "SIM" : "NÃO"));
+        Logger.log("");
+      });
+
+      if (eventosForaDoFiltro.length > 10) {
+        Logger.log("   ... e mais " + (eventosForaDoFiltro.length - 10) + " eventos ignorados.");
+      }
+    }
+
+    Logger.log("\n✅ Debug concluído! Verifique os logs acima.");
+
+  } catch (error) {
+    Logger.log("❌ ERRO no debug: " + error.message);
+    Logger.log(error.stack);
+  }
+}
