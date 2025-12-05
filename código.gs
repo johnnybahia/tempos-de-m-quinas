@@ -146,7 +146,8 @@ function buscarDadosTempoReal() {
         if (infoTurnoAtual) {
           dataProducaoAtual = new Date(agora);
           var horaAgora = agora.getHours();
-          if (horaAgora < 7) {
+          var horaInicioPrimeiroTurno = obterHoraInicioPrimeiroTurno(maquina, configTurnos);
+          if (horaAgora < horaInicioPrimeiroTurno) {
             dataProducaoAtual.setDate(dataProducaoAtual.getDate() - 1);
           } else if (infoTurnoAtual.cruzaMeiaNoite && horaAgora < Math.floor(infoTurnoAtual.minInicio / 60)) {
             dataProducaoAtual.setDate(dataProducaoAtual.getDate() - 1);
@@ -195,8 +196,9 @@ function buscarDadosTempoReal() {
           if (infoTurnoReg && infoTurnoReg.nome === ref.refNomeTurno) {
             var dataProdReg = new Date(dataReg);
             var h = fullDateReg.getHours();
+            var horaInicioPrimeiroTurno = obterHoraInicioPrimeiroTurno(maquina, configTurnos);
 
-            if (h < 7) {
+            if (h < horaInicioPrimeiroTurno) {
               dataProdReg.setDate(dataProdReg.getDate() - 1);
             } else if (infoTurnoReg.cruzaMeiaNoite && h < Math.floor(infoTurnoReg.minInicio / 60)) {
               dataProdReg.setDate(dataProdReg.getDate() - 1);
@@ -721,8 +723,9 @@ function gerarRelatorioTurnos() {
       
       let dataProducao = new Date(dataFim);
       let horaReg = dataFim.getHours();
+      let horaInicioPrimeiroTurno = obterHoraInicioPrimeiroTurno(maquina, configTurnos);
 
-      if (horaReg < 7) {
+      if (horaReg < horaInicioPrimeiroTurno) {
         dataProducao.setDate(dataProducao.getDate() - 1);
       } else if (infoTurno.cruzaMeiaNoite && horaReg < Math.floor(infoTurno.minInicio / 60)) {
         dataProducao.setDate(dataProducao.getDate() - 1);
@@ -1055,18 +1058,39 @@ function horaParaMinutos(val) {
   if (typeof val === 'string' && val.includes(':')) { let p = val.split(':'); return parseInt(p[0]) * 60 + parseInt(p[1]); }
   return 0;
 }
-function descobrirTurnoCompleto(hora, maq, config) { 
+function descobrirTurnoCompleto(hora, maq, config) {
   let c = config[maq] || config[String(maq).trim()];
   if(!c) return null;
   let min = horaParaMinutos(new Date(hora));
   for(let t of c) {
      let i = horaParaMinutos(t.inicio);
      let f = horaParaMinutos(t.fim);
+
+     // Validar se os valores são válidos
+     if (i === 0 && f === 0) continue; // Turno não configurado
+
      let cruza = i > f;
-     if (!cruza) { if (min >= i && min < f) return { nome: t.nome, minInicio: i, minFim: f, cruzaMeiaNoite: false }; }
-     else { if (min >= i || min < f) return { nome: t.nome, minInicio: i, minFim: f, cruzaMeiaNoite: true }; }
+     // Usar <= para incluir o último minuto do turno
+     if (!cruza) { if (min >= i && min <= f) return { nome: t.nome, minInicio: i, minFim: f, cruzaMeiaNoite: false }; }
+     else { if (min >= i || min <= f) return { nome: t.nome, minInicio: i, minFim: f, cruzaMeiaNoite: true }; }
   }
   return null;
+}
+function obterHoraInicioPrimeiroTurno(maq, config) {
+  // Retorna a hora de início do primeiro turno configurado para a máquina
+  // Usado para determinar quando muda o dia de produção (ao invés de hardcoded "< 7")
+  let c = config[maq] || config[String(maq).trim()];
+  if (!c) return 7; // Fallback para 7 se não houver config
+
+  for (let t of c) {
+    if (t.inicio) {
+      let horaInicio = new Date(t.inicio);
+      if (!isNaN(horaInicio.getTime())) {
+        return horaInicio.getHours();
+      }
+    }
+  }
+  return 7; // Fallback padrão
 }
 function formatarHoraExcel(val) {
   if (val instanceof Date) return `${val.getHours().toString().padStart(2,'0')}:${val.getMinutes().toString().padStart(2,'0')}:${val.getSeconds().toString().padStart(2,'0')}`;

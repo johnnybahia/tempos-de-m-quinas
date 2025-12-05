@@ -513,14 +513,25 @@
                            suggestedMax: 6 
                        }
                    },
-                   plugins: { 
+                   plugins: {
                      legend: { display: true },
                      tooltip: {
                        callbacks: {
                          label: function(context) {
                            let label = context.dataset.label || '';
                            if (label) label += ': ';
-                           if (context.parsed.y !== null) label += context.parsed.y.toFixed(2) + ' h';
+                           if (context.parsed.y !== null) {
+                             // Converter horas decimais para HH:MM:SS
+                             let horasDecimais = context.parsed.y;
+                             let horas = Math.floor(horasDecimais);
+                             let minutosDecimais = (horasDecimais - horas) * 60;
+                             let minutos = Math.floor(minutosDecimais);
+                             let segundos = Math.floor((minutosDecimais - minutos) * 60);
+                             let tempo = horas.toString().padStart(2, '0') + ':' +
+                                        minutos.toString().padStart(2, '0') + ':' +
+                                        segundos.toString().padStart(2, '0');
+                             label += tempo;
+                           }
                            return label;
                          }
                        }
