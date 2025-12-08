@@ -1,0 +1,188 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+
+// ============================================================
+// CONFIGURAÇÕES GERAIS
+// ============================================================
+const char* ssid = "MARFIM_CEARA";
+const char* password = "marfimm0403";
+
+// SEU LINK DO GOOGLE SCRIPT (ATUALIZADO)
+String GoogleScriptURL = "https://script.google.com/macros/s/AKfycbyoMZd9g_A7IIgcCajQm71OZTEf6R4kMWQvJXy79C6W8MR24OH_Q2sQ9-uko1q9uvH8fg/exec"; 
+
+// MÁQUINAS E PINOS
+const int qtdMaquinas = 4;
+String nomes[qtdMaquinas] = {
+  "ESPULADEIRA CHINESA 2 BOCAS", 
+  "ESPULADEIRA TORRE 2 BOCAS", 
+  "ESPULADEIRA TORRE 4 BOCAS", 
+  "ESPULADEIRA LONGO 2 BOCAS"
+};
+int pinos[qtdMaquinas] = {27, 26, 25, 33};
+
+// ============================================================
+// ESTRUTURAS PARA MULTITAREFA
+// ============================================================
+
+// Estrutura do pacote de dados que será enviado para a fila
+// CORREÇÃO: Usamos bool em vez de String para evitar corrupção de memória na fila
+struct EventoData {
+  int maquinaIndex;
+  bool produzindo; // true = TEMPO PRODUZINDO, false = TEMPO PARADA
+  float duracao;
+};
+
+// Fila para comunicação entre os núcleos
+QueueHandle_t filaEnvios;
+
+// Variáveis de controle de sensores (Debounce Não-Bloqueante)
+int estadoAtual[qtdMaquinas];
+int estadoUltimo[qtdMaquinas];
+unsigned long tempoInicio[qtdMaquinas];
+unsigned long lastDebounceTime[qtdMaquinas];
+unsigned long debounceDelay = 50; // 50ms de filtro
+
+// ============================================================
+// TAREFA SECUNDÁRIA (CORE 0) - SÓ ENVIA WI-FI
+// ============================================================
+void taskEnviarGoogle(void * parameter) {
+  EventoData pacote;
+
+  while(true) {
+    // Espera chegar algo na fila (bloqueia aqui até ter dados, não gasta CPU)
+    if (xQueueReceive(filaEnvios, &pacote, portMAX_DELAY)) {
+      
+      if(WiFi.status() == WL_CONNECTED) {
+        WiFiClientSecure client; 
+        client.setInsecure();
+        client.setTimeout(8000); // Timeout de 8s
+        
+        HTTPClient http;
+        
+        // Prepara Nome da Máquina (Seguro)
+        String nomeMq = nomes[pacote.maquinaIndex];
+        nomeMq.replace(" ", "%20");
+        
+        // Prepara Evento (Seguro - Texto criado aqui na hora do envio)
+        String ev;
+        if (pacote.produzindo) {
+          ev = "TEMPO%20PRODUZINDO";
+        } else {
+          ev = "TEMPO%20PARADA";
+        }
+        
+        String urlFinal = GoogleScriptURL + "?maquina=" + nomeMq + "&evento=" + ev + "&duracao=" + String(pacote.duracao);
+        
+        Serial.print(">> [WIFI] Enviando: ");
+        Serial.print(nomes[pacote.maquinaIndex]);
+        Serial.print(" | Evento: ");
+        Serial.println(pacote.produzindo ? "PRODUZINDO" : "PARADA");
+        
+        http.begin(client, urlFinal);
+        int httpCode = http.GET();
+        
+        if (httpCode > 0) {
+          Serial.println("<< [WIFI] Sucesso! (200)");
+        } else {
+          Serial.print("xx [WIFI] Erro: ");
+          Serial.println(http.errorToString(httpCode).c_str());
+        }
+        http.end();
+      } else {
+        Serial.println("!! [WIFI] Desconectado. Tentando reconectar...");
+        WiFi.reconnect();
+        vTaskDelay(1000 / portTICK_PERIOD_MS); // Espera um pouco antes de tentar de novo
+      }
+    }
+  }
+}
+
+// ============================================================
+// SETUP
+// ============================================================
+void setup() {
+  Serial.begin(115200);
+
+  // Configura Pinos
+  for(int i=0; i < qtdMaquinas; i++) {
+    pinMode(pinos[i], INPUT_PULLUP);
+    estadoAtual[i] = digitalRead(pinos[i]);
+    estadoUltimo[i] = estadoAtual[i];
+    tempoInicio[i] = millis();
+    lastDebounceTime[i] = 0;
+  }
+
+  // Conexão Wi-Fi
+  WiFi.begin(ssid, password);
+  WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, IPAddress(8,8,8,8));
+  
+  Serial.print("Conectando WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(200);
+    Serial.print(".");
+  }
+  Serial.println("\nConectado! IP: " + WiFi.localIP().toString());
+
+  // Cria a fila de envios
+  filaEnvios = xQueueCreate(20, sizeof(EventoData));
+
+  // Cria a tarefa de envio no Core 0
+  xTaskCreatePinnedToCore(
+    taskEnviarGoogle,   // Função da tarefa
+    "EnviarWiFi",       // Nome
+    10000,              // Tamanho da pilha
+    NULL,               // Parâmetros
+    1,                  // Prioridade
+    NULL,               // Handle
+    0                   // Core 0
+  );
+  
+  Serial.println("SISTEMA MULTITAREFA INICIADO!");
+}
+
+// ============================================================
+// LOOP PRINCIPAL (CORE 1) - LEITURA INSTANTÂNEA
+// ============================================================
+void loop() {
+  for(int i=0; i < qtdMaquinas; i++) {
+    int leitura = digitalRead(pinos[i]);
+
+    if (leitura != estadoUltimo[i]) {
+      lastDebounceTime[i] = millis();
+    }
+
+    if ((millis() - lastDebounceTime[i]) > debounceDelay) {
+      
+      if (leitura != estadoAtual[i]) {
+        
+        unsigned long tempoAgora = millis();
+        float tempoSegundos = (tempoAgora - tempoInicio[i]) / 1000.0;
+
+        // Define se está produzindo ou parado baseado no estado ANTERIOR (o que acabou de terminar)
+        // Se estava LOW (Produzindo) e foi pra HIGH, terminou um ciclo de PRODUÇÃO.
+        bool estavaProduzindo = (estadoAtual[i] == LOW);
+
+        if(tempoSegundos > 1.0) {
+          EventoData novoEvento;
+          novoEvento.maquinaIndex = i;
+          novoEvento.produzindo = estavaProduzindo; // Passa apenas booleano (Leve e Seguro)
+          novoEvento.duracao = tempoSegundos;
+
+          if(xQueueSend(filaEnvios, &novoEvento, 0) != pdTRUE) {
+             Serial.println("!! Fila cheia, evento perdido");
+          } else {
+             Serial.println(">> Evento detectado: " + nomes[i]);
+          }
+        }
+
+        estadoAtual[i] = leitura;
+        tempoInicio[i] = tempoAgora;
+      }
+    }
+
+    estadoUltimo[i] = leitura;
+  }
+  
+  delay(5); 
+}
