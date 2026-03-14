@@ -1362,6 +1362,24 @@ function enviarRelatorioBase(dataAlvo) {
     if (maq) maquinasStats[maq] = { "Turno 1": 0, "Turno 2": 0, "Turno 3": 0 };
   }
 
+  // 2b. Carregar mapa de famílias da aba DADOS
+  const sheetDadosEmail = ss.getSheetByName("DADOS");
+  const mapaFamiliasEmail = {};
+  if (sheetDadosEmail) {
+    const dConfig = sheetDadosEmail.getDataRange().getValues();
+    if (dConfig.length > 0) {
+      const h = dConfig[0].map(c => String(c).toUpperCase().trim());
+      const idxM = h.findIndex(x => x.includes("MÁQUINAS") || x.includes("MAQUINAS"));
+      const idxF = h.findIndex(x => x.includes("FAMÍLIA") || x.includes("FAMILIA"));
+      if (idxM > -1 && idxF > -1) {
+        for (let i = 1; i < dConfig.length; i++) {
+          let m = String(dConfig[i][idxM]).trim().toUpperCase();
+          mapaFamiliasEmail[m] = String(dConfig[i][idxF] || "OUTROS").trim();
+        }
+      }
+    }
+  }
+
   // 3. Ler Dados do PAINEL (Dados processados e corretos)
   const sheetPainel = ss.getSheetByName("PAINEL");
   if (!sheetPainel) return;
@@ -1398,11 +1416,19 @@ function enviarRelatorioBase(dataAlvo) {
   }
 
   // 4. HTML
+  // Agrupar máquinas por família (ordem alfabética dentro de cada grupo)
+  const familiasMaquinasEmail = {};
+  Object.keys(maquinasStats).sort().forEach(maq => {
+    const fam = mapaFamiliasEmail[maq.toUpperCase()] || "OUTROS";
+    if (!familiasMaquinasEmail[fam]) familiasMaquinasEmail[fam] = [];
+    familiasMaquinasEmail[fam].push(maq);
+  });
+
   let html = `
     <div style="font-family: Arial, sans-serif; color: #333;">
       <p>Bom dia!</p>
       <p>Segue produção em horas das máquinas monitoradas na data <strong>${dataStr}</strong>.</p>
-      
+
       <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; border: 1px solid #ddd;">
         <tr style="background-color: #0056b3; color: white;">
           <th style="text-align: left;">MÁQUINA</th>
@@ -1411,26 +1437,33 @@ function enviarRelatorioBase(dataAlvo) {
           <th style="text-align: center;">TURNO 3</th>
         </tr>
   `;
-  
-  const nomesMaquinas = Object.keys(maquinasStats).sort();
-  
-  nomesMaquinas.forEach(maq => {
-    html += `<tr><td style="font-weight:bold;">${maq}</td>`;
-    
-    ["Turno 1", "Turno 2", "Turno 3"].forEach(t => {
-      let segundos = maquinasStats[maq][t];
-      let celula = "";
-      if (segundos > 0) {
-        celula = `<span style="color: green; font-weight: bold; font-size: 14px;">${formatarSegundosParaEmail(segundos)}</span>`;
-      } else {
-        celula = `<span style="color: #dc3545; font-size: 10px; font-weight: bold;">SEM OPERAÇÃO NESTE PERÍODO</span>`;
-      }
-      html += `<td style="text-align: center;">${celula}</td>`;
+
+  Object.keys(familiasMaquinasEmail).sort().forEach(fam => {
+    // Cabeçalho da família
+    html += `<tr style="background-color: #d0e4f7;">
+      <td colspan="4" style="font-weight: bold; color: #0056b3; padding: 6px 10px; font-size: 13px; letter-spacing: 0.5px;">
+        ${fam}
+      </td>
+    </tr>`;
+
+    familiasMaquinasEmail[fam].forEach(maq => {
+      html += `<tr><td style="font-weight:bold; padding-left: 18px;">${maq}</td>`;
+
+      ["Turno 1", "Turno 2", "Turno 3"].forEach(t => {
+        let segundos = maquinasStats[maq][t];
+        let celula = "";
+        if (segundos > 0) {
+          celula = `<span style="color: green; font-weight: bold; font-size: 14px;">${formatarSegundosParaEmail(segundos)}</span>`;
+        } else {
+          celula = `<span style="color: #dc3545; font-size: 10px; font-weight: bold;">SEM OPERAÇÃO NESTE PERÍODO</span>`;
+        }
+        html += `<td style="text-align: center;">${celula}</td>`;
+      });
+
+      html += `</tr>`;
     });
-    
-    html += `</tr>`;
   });
-  
+
   html += `
       </table>
       <br>
