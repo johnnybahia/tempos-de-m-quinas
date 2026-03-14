@@ -8,40 +8,54 @@
 const char* ssid = "MARFIM_CEARA";
 const char* password = "marfimm0403";
 
-// SEU LINK DO GOOGLE SCRIPT (ATUALIZADO)
+// SEU LINK DO GOOGLE SCRIPT
 String GoogleScriptURL = "https://script.google.com/macros/s/AKfycbyoMZd9g_A7IIgcCajQm71OZTEf6R4kMWQvJXy79C6W8MR24OH_Q2sQ9-uko1q9uvH8fg/exec"; 
 
-// MÁQUINAS E PINOS
-const int qtdMaquinas = 4;
+// ============================================================
+// MÁQUINAS E PINOS GPIO DO ESP32
+// ============================================================
+// MAPEAMENTO DE CONEXÕES:
+//
+// Máquina                             | GPIO | Entrada Física
+// ------------------------------------|------|---------------
+// MÁQUINA DE ENROLAR BOCA 1           | 27   | Canal 1
+// MÁQUINA DE ENROLAR BOCA 2           | 26   | Canal 2
+// ENGOMADEIRA                         | 25   | Canal 3
+// MÁQUINA DE ENROLAR FITAS BOLACHAS   | 33   | Canal 4
+// MÁQUINA DE ENROLAR 1 BOCA           | 32   | Canal 5
+//
+// IMPORTANTE: Conectar o sinal de cada máquina no GPIO correspondente
+// Sinal LOW = Máquina PRODUZINDO
+// Sinal HIGH = Máquina PARADA
+// ============================================================
+
+const int qtdMaquinas = 5;
 String nomes[qtdMaquinas] = {
-  "ESPULADEIRA CHINESA 2 BOCAS", 
-  "ESPULADEIRA TORRE 2 BOCAS", 
-  "ESPULADEIRA TORRE 4 BOCAS", 
-  "ESPULADEIRA LONGO 2 BOCAS"
+  "MÁQUINA DE ENROLAR BOCA 1",         // GPIO 27
+  "MÁQUINA DE ENROLAR BOCA 2",         // GPIO 26
+  "ENGOMADEIRA",                       // GPIO 25
+  "MÁQUINA DE ENROLAR FITAS BOLACHAS", // GPIO 33
+  "MÁQUINA DE ENROLAR 1 BOCA"          // GPIO 32
 };
-int pinos[qtdMaquinas] = {27, 26, 25, 33};
+int pinos[qtdMaquinas] = {27, 26, 25, 33, 32};
 
 // ============================================================
 // ESTRUTURAS PARA MULTITAREFA
 // ============================================================
 
-// Estrutura do pacote de dados que será enviado para a fila
-// CORREÇÃO: Usamos bool em vez de String para evitar corrupção de memória na fila
 struct EventoData {
   int maquinaIndex;
-  bool produzindo; // true = TEMPO PRODUZINDO, false = TEMPO PARADA
+  bool produzindo;
   float duracao;
 };
 
-// Fila para comunicação entre os núcleos
 QueueHandle_t filaEnvios;
 
-// Variáveis de controle de sensores (Debounce Não-Bloqueante)
 int estadoAtual[qtdMaquinas];
 int estadoUltimo[qtdMaquinas];
 unsigned long tempoInicio[qtdMaquinas];
 unsigned long lastDebounceTime[qtdMaquinas];
-unsigned long debounceDelay = 50; // 50ms de filtro
+unsigned long debounceDelay = 50;
 
 // ============================================================
 // TAREFA SECUNDÁRIA (CORE 0) - SÓ ENVIA WI-FI
@@ -50,21 +64,18 @@ void taskEnviarGoogle(void * parameter) {
   EventoData pacote;
 
   while(true) {
-    // Espera chegar algo na fila (bloqueia aqui até ter dados, não gasta CPU)
     if (xQueueReceive(filaEnvios, &pacote, portMAX_DELAY)) {
       
       if(WiFi.status() == WL_CONNECTED) {
         WiFiClientSecure client; 
         client.setInsecure();
-        client.setTimeout(8000); // Timeout de 8s
+        client.setTimeout(8000);
         
         HTTPClient http;
         
-        // Prepara Nome da Máquina (Seguro)
         String nomeMq = nomes[pacote.maquinaIndex];
         nomeMq.replace(" ", "%20");
         
-        // Prepara Evento (Seguro - Texto criado aqui na hora do envio)
         String ev;
         if (pacote.produzindo) {
           ev = "TEMPO%20PRODUZINDO";
@@ -92,7 +103,7 @@ void taskEnviarGoogle(void * parameter) {
       } else {
         Serial.println("!! [WIFI] Desconectado. Tentando reconectar...");
         WiFi.reconnect();
-        vTaskDelay(1000 / portTICK_PERIOD_MS); // Espera um pouco antes de tentar de novo
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
       }
     }
   }
@@ -104,7 +115,6 @@ void taskEnviarGoogle(void * parameter) {
 void setup() {
   Serial.begin(115200);
 
-  // Configura Pinos
   for(int i=0; i < qtdMaquinas; i++) {
     pinMode(pinos[i], INPUT_PULLUP);
     estadoAtual[i] = digitalRead(pinos[i]);
@@ -113,32 +123,42 @@ void setup() {
     lastDebounceTime[i] = 0;
   }
 
-  // Conexão Wi-Fi
-  WiFi.begin(ssid, password);
+  // ✅ CORREÇÃO: config ANTES do begin
+  WiFi.mode(WIFI_STA);
   WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, IPAddress(8,8,8,8));
+  WiFi.begin(ssid, password);
   
   Serial.print("Conectando WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(200);
+
+  // ✅ CORREÇÃO: timeout para não travar eternamente
+  int tentativas = 0;
+  while (WiFi.status() != WL_CONNECTED && tentativas < 30) {
+    delay(500);
     Serial.print(".");
+    tentativas++;
   }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("\nFalha no WiFi! Reiniciando...");
+    ESP.restart();
+  }
+
   Serial.println("\nConectado! IP: " + WiFi.localIP().toString());
 
-  // Cria a fila de envios
   filaEnvios = xQueueCreate(20, sizeof(EventoData));
 
-  // Cria a tarefa de envio no Core 0
   xTaskCreatePinnedToCore(
-    taskEnviarGoogle,   // Função da tarefa
-    "EnviarWiFi",       // Nome
-    10000,              // Tamanho da pilha
-    NULL,               // Parâmetros
-    1,                  // Prioridade
-    NULL,               // Handle
-    0                   // Core 0
+    taskEnviarGoogle,
+    "EnviarWiFi",
+    10000,
+    NULL,
+    1,
+    NULL,
+    0
   );
   
   Serial.println("SISTEMA MULTITAREFA INICIADO!");
+  Serial.println("Monitorando: MÁQUINAS DE ENROLAR E ENGOMADEIRA");
 }
 
 // ============================================================
@@ -159,14 +179,12 @@ void loop() {
         unsigned long tempoAgora = millis();
         float tempoSegundos = (tempoAgora - tempoInicio[i]) / 1000.0;
 
-        // Define se está produzindo ou parado baseado no estado ANTERIOR (o que acabou de terminar)
-        // Se estava LOW (Produzindo) e foi pra HIGH, terminou um ciclo de PRODUÇÃO.
         bool estavaProduzindo = (estadoAtual[i] == LOW);
 
         if(tempoSegundos > 1.0) {
           EventoData novoEvento;
           novoEvento.maquinaIndex = i;
-          novoEvento.produzindo = estavaProduzindo; // Passa apenas booleano (Leve e Seguro)
+          novoEvento.produzindo = estavaProduzindo;
           novoEvento.duracao = tempoSegundos;
 
           if(xQueueSend(filaEnvios, &novoEvento, 0) != pdTRUE) {
