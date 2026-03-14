@@ -130,7 +130,7 @@ function buscarDadosTempoReal() {
 
         if (idxM > -1 && idxF > -1) {
           for (var i = 1; i < dConfig.length; i++) {
-            var m = String(dConfig[i][idxM]).trim();
+            var m = String(dConfig[i][idxM]).trim().toUpperCase();
             mapaFamilias[m] = dConfig[i][idxF] || "GERAL";
           }
         }
@@ -181,7 +181,7 @@ function buscarDadosTempoReal() {
           ultimoEvento: linha[3],
           timestamp: timestampFinal,
           turnoAtual: nomeTurnoAtual,
-          familia: mapaFamilias[maquina] || "OUTROS",
+          familia: mapaFamilias[maquina.toUpperCase()] || "OUTROS",
           totalProduzindo: 0,
           totalParada: 0,
           refNomeTurno: nomeTurnoAtual,
@@ -528,7 +528,7 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
       const idxF = h.findIndex(x => x.includes("FAMÍLIA") || x.includes("FAMILIA"));
       if (idxM > -1 && idxF > -1) {
         for (let i = 1; i < dConfig.length; i++) {
-          let m = String(dConfig[i][idxM]).trim();
+          let m = String(dConfig[i][idxM]).trim().toUpperCase();
           mapaFamilias[m] = String(dConfig[i][idxF] || "GERAL").trim();
         }
       }
@@ -546,7 +546,7 @@ function buscarRelatorioFamilia(familia, dataInicio, dataFim) {
   for (let i = 1; i < dados.length; i++) {
     const linha = dados[i];
     const nomeMaquina = String(linha[0]).trim();
-    const familiaMaquina = mapaFamilias[nomeMaquina] || "";
+    const familiaMaquina = mapaFamilias[nomeMaquina.toUpperCase()] || "";
     
     if (familiaMaquina.toUpperCase() !== familia.toUpperCase()) {
       continue;
