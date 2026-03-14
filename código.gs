@@ -1980,3 +1980,81 @@ function debugarCalculosMaquina(nomeMaquina) {
     Logger.log(error.stack);
   }
 }
+
+// ==========================================================
+// LIMPEZA AUTOMÁTICA DA Página1 — mantém apenas 45 dias
+// ==========================================================
+
+/**
+ * Apaga da Página1 todas as linhas com data anterior a 45 dias atrás.
+ * As linhas estão em ordem cronológica (mais antigas no topo), então
+ * encontramos o último índice antigo e deletamos em bloco — eficiente.
+ *
+ * Para agendar: rode instalarTriggerLimpeza() uma única vez.
+ */
+function limparPagina1() {
+  var ss = getSS();
+  var sheet = ss.getSheetByName("Página1");
+  if (!sheet) { Logger.log("Aba Página1 não encontrada."); return; }
+
+  var dados = sheet.getDataRange().getValues();
+  if (dados.length <= 1) return; // só cabeçalho ou vazia
+
+  var timezone = ss.getSpreadsheetTimeZone();
+  var corte = new Date();
+  corte.setDate(corte.getDate() - 45);
+  corte.setHours(0, 0, 0, 0);
+
+  // Encontra até qual linha (1-indexed, pulando cabeçalho) os dados são antigos
+  var ultimaLinhaAntiga = 0;
+  for (var i = 1; i < dados.length; i++) {
+    var celula = dados[i][0];
+    var dataLinha;
+
+    if (celula instanceof Date) {
+      dataLinha = celula;
+    } else {
+      // formato "dd/MM/yyyy"
+      var partes = String(celula).split("/");
+      if (partes.length !== 3) continue;
+      dataLinha = new Date(partes[2], partes[1] - 1, partes[0]);
+    }
+
+    if (dataLinha < corte) {
+      ultimaLinhaAntiga = i + 1; // +1 porque sheet rows são 1-indexed
+    } else {
+      break; // dados em ordem cronológica, pode parar aqui
+    }
+  }
+
+  if (ultimaLinhaAntiga < 2) {
+    Logger.log("Nenhuma linha antiga para apagar.");
+    return;
+  }
+
+  // linha 1 = cabeçalho, dados começam na linha 2
+  var qtdLinhas = ultimaLinhaAntiga - 1; // exclui cabeçalho
+  sheet.deleteRows(2, qtdLinhas);
+  Logger.log("✅ Limpeza Página1: " + qtdLinhas + " linha(s) apagadas (anteriores a " + Utilities.formatDate(corte, timezone, "dd/MM/yyyy") + ").");
+}
+
+/**
+ * Instala um trigger para rodar limparPagina1() toda semana (domingo à meia-noite).
+ * Execute esta função UMA única vez pelo menu do Apps Script.
+ */
+function instalarTriggerLimpeza() {
+  // Remove trigger anterior se existir para evitar duplicatas
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === "limparPagina1") {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+
+  ScriptApp.newTrigger("limparPagina1")
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.SUNDAY)
+    .atHour(0)
+    .create();
+
+  Logger.log("✅ Trigger semanal de limpeza instalado (domingo à meia-noite).");
+}
