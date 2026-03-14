@@ -1442,7 +1442,7 @@ function enviarRelatorioBase(dataAlvo) {
     // Cabeçalho da família
     html += `<tr style="background-color: #d0e4f7;">
       <td colspan="4" style="font-weight: bold; color: #0056b3; padding: 6px 10px; font-size: 13px; letter-spacing: 0.5px;">
-        ${fam}
+        SETOR &mdash; ${fam}
       </td>
     </tr>`;
 
