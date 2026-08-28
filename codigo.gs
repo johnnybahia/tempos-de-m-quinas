@@ -1363,6 +1363,83 @@ function buscarRelatorioCompacto(dataStr) {
   }
 }
 
+// ==========================================================
+// PLANILHA DE RELATÓRIO — arquivo próprio (não é a ID_PLANILHA
+// operacional, que tem a aba LOGIN com senha em texto puro), com uma
+// aba por mês, preenchida todo dia com a mesma produção que ia no e-mail.
+// ==========================================================
+
+const CHAVE_PROP_PLANILHA_RELATORIO = "ID_PLANILHA_RELATORIO";
+
+function getOuCriarPlanilhaRelatorio() {
+  const props = PropertiesService.getScriptProperties();
+  const idSalvo = props.getProperty(CHAVE_PROP_PLANILHA_RELATORIO);
+  if (idSalvo) {
+    try { return SpreadsheetApp.openById(idSalvo); } catch (error) {
+      Logger.log("⚠ Planilha de relatório salva não foi encontrada, criando uma nova: " + error.message);
+    }
+  }
+  const nova = SpreadsheetApp.create("Relatório de Produção — Marfim");
+  props.setProperty(CHAVE_PROP_PLANILHA_RELATORIO, nova.getId());
+  Logger.log("✅ Planilha de relatório criada: " + nova.getUrl());
+  return nova;
+}
+
+function nomeAbaMes(data) {
+  const meses = ["JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT","NOV","DEZ"];
+  return meses[data.getMonth()] + " " + data.getFullYear();
+}
+
+// Grava as máquinas do dia na aba do mês correspondente (cria a aba se
+// for a primeira vez). Se já existir um lançamento desse mesmo dia (ex.:
+// reenvio de teste), substitui em vez de duplicar.
+function escreverRelatorioNaPlanilha(ss, relatorio) {
+  const aba = garantirAba(ss, nomeAbaMes(lerDataBR(relatorio.data)),
+    ["DATA", "SETOR", "MÁQUINA", "TURNO 1", "TURNO 2", "TURNO 3"]);
+
+  const existentes = aba.getDataRange().getValues();
+  let inicioAntigo = -1, qtdAntiga = 0;
+  for (let i = 1; i < existentes.length; i++) {
+    if (String(existentes[i][0]).trim() === relatorio.data) {
+      if (inicioAntigo === -1) inicioAntigo = i + 1;
+      qtdAntiga++;
+    }
+  }
+  if (qtdAntiga > 0) aba.deleteRows(inicioAntigo, qtdAntiga);
+
+  const linhas = [];
+  const coresTurno = [];
+  relatorio.setores.forEach(setor => {
+    setor.maquinas.forEach(m => {
+      linhas.push([
+        relatorio.data, setor.nome, m.maquina,
+        formatarSegundosParaHora(m.turnos[0]),
+        formatarSegundosParaHora(m.turnos[1]),
+        formatarSegundosParaHora(m.turnos[2])
+      ]);
+      coresTurno.push(m.turnos.map(seg => seg > 0 ? "#e8f5e9" : "#fce8e6"));
+    });
+  });
+  if (!linhas.length) return aba;
+
+  const primeiraLinhaNova = aba.getLastRow() + 1;
+  aba.getRange(primeiraLinhaNova, 1, linhas.length, 6).setValues(linhas);
+  aba.getRange(primeiraLinhaNova, 4, linhas.length, 3).setBackgrounds(coresTurno);
+  aba.autoResizeColumns(1, 6);
+
+  return aba;
+}
+
+// Dá acesso de leitura na planilha de relatório para cada e-mail da aba
+// EMAIL, pra quem recebe o link poder abrir sem precisar de outro login.
+function compartilharPlanilhaRelatorio(ss, destinatariosCsv) {
+  String(destinatariosCsv).split(",").map(e => e.trim()).filter(e => e).forEach(email => {
+    try { ss.addViewer(email); } catch (error) {
+      Logger.log("⚠ Não foi possível dar acesso de leitura a " + email + ": " + error.message);
+    }
+  });
+}
+
 function enviarRelatorioBase(dataAlvo) {
   const ss = getSS();
 
@@ -1377,11 +1454,10 @@ function enviarRelatorioBase(dataAlvo) {
   const relatorio = montarRelatorioCompacto(dataAlvo);
   if (!relatorio) { Logger.log("❌ Aba PAINEL não encontrada — relatório não gerado."); return; }
 
-  let urlApp = "";
-  try { urlApp = ScriptApp.getService().getUrl(); } catch (error) {
-    Logger.log("⚠ Não foi possível obter a URL do app: " + error.message);
-  }
-  const link = urlApp ? (urlApp + "?data=" + encodeURIComponent(relatorio.data)) : "";
+  const ssRelatorio = getOuCriarPlanilhaRelatorio();
+  const abaRelatorio = escreverRelatorioNaPlanilha(ssRelatorio, relatorio);
+  compartilharPlanilhaRelatorio(ssRelatorio, destinatarios);
+  const link = abaRelatorio ? (ssRelatorio.getUrl() + "#gid=" + abaRelatorio.getSheetId()) : ssRelatorio.getUrl();
 
   const t = relatorio.totais;
   const html = `
@@ -1394,8 +1470,8 @@ function enviarRelatorioBase(dataAlvo) {
         <span style="color:#b3690f;font-weight:bold;">${t.atencao} em atenção</span> &middot;
         <span style="color:#c0392b;font-weight:bold;">${t.semProducao} sem produção</span>
       </p>
-      ${link ? `<p><a href="${link}" style="display:inline-block;background:#0056b3;color:#ffffff;
-        text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:bold;">Abrir relatório completo</a></p>` : ""}
+      <p><a href="${link}" style="display:inline-block;background:#0056b3;color:#ffffff;
+        text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:bold;">Abrir planilha de produção (${nomeAbaMes(lerDataBR(relatorio.data))})</a></p>
       <p>Atenciosamente,<br><strong>Controle de Rotinas e Prazos Marfim.</strong></p>
     </div>`;
 
