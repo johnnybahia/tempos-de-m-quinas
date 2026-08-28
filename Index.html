@@ -9,14 +9,14 @@
     <style>
       :root { --primary: #0056b3; --success: #28a745; --danger: #dc3545; --dark: #333; --light: #f4f6f9; }
       body { font-family: 'Roboto', sans-serif; background-color: var(--light); margin: 0; padding: 0; color: #333; }
-      
+
       #login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #004a99, #002a5c); display: flex; justify-content: center; align-items: center; z-index: 2000; }
       .login-card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 15px 30px rgba(0,0,0,0.3); width: 90%; max-width: 320px; text-align: center; }
       .login-logo { max-width: 180px; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto; }
       .login-card h2 { margin-top: 0; color: var(--primary); font-size: 18px; text-transform: uppercase; margin-bottom: 20px; }
       .login-card input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
       .login-card button { width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 10px; }
-      
+
       #app-container { display: none; padding: 10px; max-width: 1400px; margin: 0 auto; }
       header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #ddd; padding-bottom: 10px; flex-wrap: wrap; gap: 10px; }
       h1 { margin: 0; font-size: 22px; text-transform: uppercase; color: var(--dark); }
@@ -25,53 +25,79 @@
       .stats-total { background: #e3f2fd; color: #1976d2; }
       .stats-running { background: #e8f5e9; color: #2e7d32; }
       .stats-stopped { background: #ffebee; color: #c62828; }
-      
+
+      /* Indicador de sincronização */
+      #sync-indicator { font-size: 11px; color: #999; display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; }
+      #sync-dot { width: 8px; height: 8px; border-radius: 50%; background: #28a745; display: inline-block; transition: background 0.3s; }
+      #sync-dot.syncing { background: #ffc107; animation: pulse 1s infinite; }
+      #sync-dot.error { background: #dc3545; }
+      @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
       .family-section { margin-bottom: 40px; background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
       .family-title { font-size: 18px; color: #fff; background: var(--primary); padding: 8px 15px; border-radius: 5px; margin: -15px -15px 15px -15px; text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-      
-      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 15px; }
-      
+
+      .family-cards-row {
+        display: flex;
+        gap: 15px;
+        overflow-x: auto;
+        padding-bottom: 8px;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+      }
+      .family-cards-row::-webkit-scrollbar { height: 8px; }
+      .family-cards-row::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+      .family-cards-row::-webkit-scrollbar-track { background: transparent; }
+      .family-cards-row .card { flex: 0 0 260px; }
+
       .card { background: #fff; border: 1px solid #eee; border-radius: 8px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: transform 0.2s; position: relative; overflow: hidden; display: flex; flex-direction: column; }
       .card:hover { transform: translateY(-3px); box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
       .card::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 5px; background: #ccc; }
       .card.rodando::before { background: var(--success); }
       .card.parada::before { background: var(--danger); }
-      
+
       .card-title { font-size: 14px; font-weight: bold; color: #333; margin-bottom: 10px; min-height: 35px; display: flex; align-items: center; line-height: 1.2; cursor: pointer; user-select: none; }
       .card-status { font-size: 12px; font-weight: bold; color: white; padding: 4px 10px; border-radius: 4px; display: inline-block; margin-bottom: 10px; text-transform: uppercase; align-self: flex-start; }
-      .card-timer { font-size: 32px; font-family: 'Courier New', monospace; color: var(--dark); font-weight: 700; margin-bottom: 15px; }
-      
+
+      /* Timer principal — contador ao vivo */
+      .card-timer { font-size: 32px; font-family: 'Courier New', monospace; color: var(--dark); font-weight: 700; margin-bottom: 4px; }
+      .card-timer-label { font-size: 9px; color: #aaa; text-align: center; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+
       .card-daily-totals { background: #f8f9fa; border-radius: 5px; padding: 8px; font-size: 11px; color: #666; width: 100%; box-sizing: border-box; border: 1px solid #eee; }
-      .daily-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
-      .daily-val-prod { color: var(--success); font-weight: bold; }
-      .daily-val-stop { color: var(--danger); font-weight: bold; }
+      .daily-row { display: flex; justify-content: space-between; margin-bottom: 4px; align-items: center; }
+      .daily-val-prod { color: var(--success); font-weight: bold; font-family: 'Courier New', monospace; font-size: 13px; }
+      .daily-val-stop { color: var(--danger); font-weight: bold; font-family: 'Courier New', monospace; font-size: 13px; }
+
+      /* Barra de progresso produtividade */
+      .prod-bar-wrap { margin-top: 8px; }
+      .prod-bar-label { font-size: 10px; color: #888; margin-bottom: 3px; display: flex; justify-content: space-between; }
+      .prod-bar-bg { background: #eee; border-radius: 4px; height: 6px; overflow: hidden; }
+      .prod-bar-fill { height: 100%; border-radius: 4px; transition: width 1s linear; background: var(--success); }
+
       .card-turno { font-size: 11px; color: #999; margin-top: 8px; text-align: right; }
-      
+
       .btn-stops { background: none; border: 1px solid #ddd; color: #666; font-size: 11px; padding: 4px 8px; border-radius: 4px; cursor: pointer; margin-top: 10px; width: 100%; text-align: center; font-weight: bold; }
       .btn-stops:hover { background: #eee; }
-
       .btn-chart { background: none; border: 1px solid #007bff; color: #007bff; font-size: 11px; padding: 4px 8px; border-radius: 4px; cursor: pointer; margin-top: 5px; width: 100%; text-align: center; font-weight: bold; }
       .btn-chart:hover { background: #e3f2fd; }
-
       .card-footer-hint { margin-top: 5px; padding-top: 8px; font-size: 10px; color: #999; text-align: center; text-transform: uppercase; font-weight: bold; border-top: 1px dashed #eee; width: 100%; cursor: pointer; }
 
       .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
       .modal-content { background: white; width: 95%; max-width: 900px; max-height: 95vh; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
       .modal-header { padding: 15px; background: var(--primary); color: white; display: flex; justify-content: space-between; align-items: center; font-size: 18px; font-weight: bold; }
       .close { cursor: pointer; font-size: 24px; }
-      
+
       .tabs { display: flex; background: #f8f9fa; border-bottom: 1px solid #ddd; }
       .tab { flex: 1; padding: 12px; text-align: center; cursor: pointer; color: #666; font-weight: bold; font-size: 14px; }
       .tab.active { background: white; color: var(--primary); border-top: 3px solid var(--primary); border-bottom: 1px solid white; }
       .tab-body { padding: 20px; overflow-y: auto; flex: 1; }
       .hidden { display: none; }
-      
+
       .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
       .form-group { margin-bottom: 12px; }
       label { display: block; font-size: 11px; font-weight: bold; margin-bottom: 4px; color: #555; text-transform: uppercase; }
       select, input, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
       button.save { width: 100%; background: var(--success); color: white; padding: 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; margin-top: 15px; font-size: 14px; }
-      
+
       .hist-controls { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 15px; padding: 15px; background: #f1f3f5; border-radius: 6px; }
       .hist-controls button { padding: 8px 15px; border-radius: 4px; border: none; font-weight: bold; cursor: pointer; font-size: 13px; height: 35px; }
       .btn-buscar { background: var(--primary); color: white; }
@@ -103,13 +129,17 @@
       <header>
         <div>
           <h1>Painel de Produção</h1>
-          <div style="margin-top:8px;">
+          <div style="margin-top:8px; display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
             <span class="stats-badge stats-total" id="stats-total">0 máquinas</span>
             <span class="stats-badge stats-running" id="stats-running">0 rodando</span>
             <span class="stats-badge stats-stopped" id="stats-stopped">0 paradas</span>
+            <span id="sync-indicator">
+              <span id="sync-dot"></span>
+              <span id="sync-label">aguardando</span>
+            </span>
           </div>
         </div>
-        <div style="display:flex; gap:10px; align-items:center;">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
           <button onclick="abrirModalRelatorioFamilia()" style="padding:8px 15px; background:#007bff; color:white; border:none; border-radius:5px; font-size:13px; cursor:pointer; font-weight:bold;">
             📋 Gerar Relatório por Família
           </button>
@@ -119,14 +149,15 @@
           <div class="user-badge" id="user-display">Usuário</div>
         </div>
       </header>
-      
-      <div id="maquinas-grid" class="grid">
+
+      <div id="maquinas-grid">
         <div style="text-align:center; padding:40px;">
           <div style="font-size:14px; color:#666;">⏳ Carregando dados das máquinas...</div>
         </div>
       </div>
     </div>
 
+    <!-- Modal detalhes / apontamento -->
     <div id="modal-detalhes" class="modal">
       <div class="modal-content">
         <div class="modal-header">
@@ -172,6 +203,7 @@
       </div>
     </div>
 
+    <!-- Modal paradas críticas -->
     <div id="modal-paradas-criticas" class="modal">
       <div class="modal-content" style="max-width:500px;">
         <div class="modal-header">
@@ -187,7 +219,8 @@
         </div>
       </div>
     </div>
-    
+
+    <!-- Modal gráfico -->
     <div id="modal-grafico" class="modal">
       <div class="modal-content" style="max-width:900px; max-height: 95vh; overflow:hidden; display:flex; flex-direction:column;">
         <div class="modal-header">
@@ -213,9 +246,10 @@
         </div>
       </div>
     </div>
-    
+
+    <!-- Modal relatório família -->
     <div id="modal-relatorio-familia" class="modal">
-       <div class="modal-content" style="max-width:95%; max-height:90vh; overflow-y:auto;">
+      <div class="modal-content" style="max-width:95%; max-height:90vh; overflow-y:auto;">
         <div class="modal-header">
           <span id="relatorio-titulo">📊 Relatório por Família</span>
           <span class="close" onclick="fecharRelatorioFamilia()">&times;</span>
@@ -247,7 +281,6 @@
           <div style="text-align:center; padding:60px; color:#999;">
             <div style="font-size:16px; margin-bottom:10px;">📊</div>
             <div>Selecione a família e o período acima</div>
-            <div style="font-size:12px; margin-top:5px; color:#aaa;">Clique em "Gerar Relatório" para visualizar os dados</div>
           </div>
         </div>
         <div id="relatorio-acoes" style="padding:0 20px 20px; text-align:right; display:none;">
@@ -259,11 +292,30 @@
     </div>
 
     <script>
+      // ============================================================
+      // ESTADO GLOBAL
+      // ============================================================
+
+      // Snapshot mais recente recebido do servidor
+      // Estrutura: { nomeMaquina: { totalProduzindo, totalParada, timestamp, ultimoEvento, ... } }
+      let SnapshotServidor = {};
+
+      // Timestamp local (Date.now()) de quando o snapshot foi recebido
+      let SnapshotRecebidoEm = 0;
+
       let MaquinasData = {};
-      let HistoricoAtual = []; 
-      let FamiliasDisponiveis = []; 
+      let HistoricoAtual = [];
+      let FamiliasDisponiveis = [];
       let chart1 = null, chart2 = null, chart3 = null;
-      
+
+      // IDs dos intervalos para poder cancelar se necessário
+      let intervaloServidor = null;
+      let intervaloLocal = null;
+
+      // ============================================================
+      // INICIALIZAÇÃO
+      // ============================================================
+
       window.onload = function() {
         const hoje = new Date().toISOString().split('T')[0];
         document.getElementById('apt-data').value = hoje;
@@ -280,7 +332,7 @@
         const msg = document.getElementById('login-msg');
         msg.innerText = "Verificando...";
         google.script.run.withSuccessHandler(res => {
-          if(res.sucesso) {
+          if (res.sucesso) {
             document.getElementById('user-display').innerText = res.usuario;
             document.getElementById('login-overlay').style.display = 'none';
             document.getElementById('app-container').style.display = 'block';
@@ -292,401 +344,439 @@
       }
 
       function iniciarMonitoramento() {
-        atualizarTempoReal();
-        setInterval(atualizarTempoReal, 5000); 
+        // 1ª carga imediata
+        buscarDoServidor();
+
+        // Servidor: a cada 30 segundos
+        intervaloServidor = setInterval(buscarDoServidor, 30000);
+
+        // Local: a cada 1 segundo — incrementa contadores sem chamar o servidor
+        intervaloLocal = setInterval(tickLocal, 1000);
       }
 
-      function atualizarTempoReal() {
+      // ============================================================
+      // BUSCA DO SERVIDOR (a cada 30s)
+      // ============================================================
+
+      function buscarDoServidor() {
+        setSyncStatus('syncing', 'sincronizando...');
         google.script.run
-          .withSuccessHandler(renderizarCards)
-          .withFailureHandler(console.error)
+          .withSuccessHandler(function(dadosRecebidos) {
+            let dados = dadosRecebidos;
+            if (typeof dadosRecebidos === 'string') {
+              try { dados = JSON.parse(dadosRecebidos); } catch(e) {
+                setSyncStatus('error', 'erro ao ler dados');
+                return;
+              }
+            }
+            if (!dados || typeof dados !== 'object') {
+              setSyncStatus('error', 'dados inválidos');
+              return;
+            }
+
+            // Salva o snapshot com o momento exato da recepção
+            SnapshotServidor = dados;
+            SnapshotRecebidoEm = Date.now();
+
+            // Renderiza os cards com os dados do servidor
+            renderizarCards(dados);
+            setSyncStatus('ok', 'atualizado ' + horaFormatada());
+          })
+          .withFailureHandler(function(err) {
+            setSyncStatus('error', 'falha na conexão');
+            console.error('Erro ao buscar dados:', err);
+          })
           .buscarDadosTempoReal();
       }
 
-      function renderizarCards(dadosRecebidos) {
-        let dados = dadosRecebidos;
-        if (typeof dadosRecebidos === 'string') {
-          try { dados = JSON.parse(dadosRecebidos); } catch (e) { return; }
-        }
-        if (!dados || typeof dados !== 'object') return;
+      // ============================================================
+      // TICK LOCAL (a cada 1s) — incrementa sem chamar o servidor
+      // ============================================================
 
+      function tickLocal() {
+        if (!SnapshotRecebidoEm || Object.keys(SnapshotServidor).length === 0) return;
+
+        Object.keys(SnapshotServidor).forEach(nome => {
+          const snap = SnapshotServidor[nome];
+          const card = document.getElementById('card-' + cssId(nome));
+          if (!card) return;
+
+          // Apenas o relógio grande cresce localmente —
+          // mostra quanto tempo a máquina está no estado atual CONHECIDO pelo HTML.
+          // Os totais (produzindo/parada) só atualizam quando o servidor responde,
+          // evitando mostrar valores falsos quando a máquina já mudou de estado.
+          const diff = Math.floor((Date.now() - snap.timestamp) / 1000);
+          const timerEl = card.querySelector('.card-timer');
+          if (timerEl) timerEl.textContent = formatarSegundos(diff);
+        });
+      }
+
+      // ============================================================
+      // RENDERIZAÇÃO DOS CARDS (chamada na chegada do servidor)
+      // ============================================================
+
+      function renderizarCards(dados) {
         MaquinasData = dados;
         const container = document.getElementById('maquinas-grid');
         const fragment = document.createDocumentFragment();
-        
+
         let totalMaquinas = 0, totalRodando = 0, totalParadas = 0;
         const grupos = {};
 
         Object.keys(dados).forEach(nome => {
-           const info = dados[nome];
-           const fam = info.familia || "OUTROS";
-           if(!grupos[fam]) grupos[fam] = [];
-           grupos[fam].push({nome, ...info});
-
-           totalMaquinas++;
-           if (info.ultimoEvento === "TEMPO PARADA") totalRodando++;
-           else if (info.ultimoEvento === "TEMPO PRODUZINDO") totalParadas++;
+          const info = dados[nome];
+          const fam = info.familia || "OUTROS";
+          if (!grupos[fam]) grupos[fam] = [];
+          grupos[fam].push({nome, ...info});
+          totalMaquinas++;
+          if (info.ultimoEvento === "TEMPO PARADA")     totalRodando++;
+          else if (info.ultimoEvento === "TEMPO PRODUZINDO") totalParadas++;
         });
 
-        document.getElementById('stats-total').textContent = `${totalMaquinas} máquinas`;
+        document.getElementById('stats-total').textContent   = `${totalMaquinas} máquinas`;
         document.getElementById('stats-running').textContent = `${totalRodando} rodando`;
-        document.getElementById('stats-stopped').textContent = `${totalParadas} parada`;
+        document.getElementById('stats-stopped').textContent = `${totalParadas} paradas`;
 
         const familias = Object.keys(grupos).sort();
-        if(familias.length === 0) {
+        if (familias.length === 0) {
           container.innerHTML = "<p style='text-align:center'>Sem dados.</p>";
           return;
         }
 
-        const agora = new Date().getTime();
-
         familias.forEach(fam => {
-           const section = document.createElement('div');
-           section.className = "family-section";
-           section.innerHTML = `<div class="family-title">${fam}</div>`;
-           const grid = document.createElement('div');
-           grid.className = "grid";
+          const section = document.createElement('div');
+          section.className = "family-section";
+          section.innerHTML = `<div class="family-title">${fam}</div>`;
+          const grid = document.createElement('div');
+          grid.className = "family-cards-row";
 
-           grupos[fam].sort((a,b) => a.nome.localeCompare(b.nome));
+          grupos[fam].sort((a, b) => a.nome.localeCompare(b.nome));
 
-           grupos[fam].forEach(maq => {
-              const diff = Math.floor((agora - maq.timestamp)/1000);
-              let estadoTxt = "DESCONHECIDO", classe = "parada", cor = "#777";
+          grupos[fam].forEach(maq => {
+            const diff = Math.floor((Date.now() - maq.timestamp) / 1000);
+            let estadoTxt = "DESCONHECIDO", classe = "parada", cor = "#777";
 
-              if (maq.ultimoEvento === "TEMPO PARADA") {
-                 estadoTxt = "RODANDO"; classe = "rodando"; cor = "#28a745";
-              } else if (maq.ultimoEvento === "TEMPO PRODUZINDO") {
-                 estadoTxt = "PARADA"; classe = "parada"; cor = "#dc3545";
-              }
+            if (maq.ultimoEvento === "TEMPO PARADA") {
+              estadoTxt = "RODANDO"; classe = "rodando"; cor = "#28a745";
+            } else if (maq.ultimoEvento === "TEMPO PRODUZINDO") {
+              estadoTxt = "PARADA"; classe = "parada"; cor = "#dc3545";
+            }
 
-              const tempoFmt = formatarSegundos(diff);
-              const prodDia = formatarSegundos(maq.totalProduzindo);
-              const stopDia = formatarSegundos(maq.totalParada);
+            const tempoFmt  = formatarSegundos(diff);
+            const prodDia   = formatarSegundos(maq.totalProduzindo);
+            const stopDia   = formatarSegundos(maq.totalParada);
+            const totalTurno = maq.totalProduzindo + maq.totalParada;
+            const pct = totalTurno > 0 ? Math.min(100, Math.round((maq.totalProduzindo / totalTurno) * 100)) : 0;
+            const corBarra = pct >= 70 ? '#28a745' : pct >= 40 ? '#ffc107' : '#dc3545';
 
-              const card = document.createElement('div');
-              card.className = `card ${classe}`;
-              
-              // Exibir horário de início se disponível
-              let horarioInicioHTML = '';
-              if (maq.horarioInicio && maq.horarioInicio !== "") {
-                horarioInicioHTML = `<div style="font-size:10px; color:#666; text-align:center; margin-bottom:5px;">
-                  🕐 Início turno: ${maq.horarioInicio}
-                </div>`;
-              }
+            let horarioInicioHTML = '';
+            if (maq.horarioInicio && maq.horarioInicio !== "") {
+              horarioInicioHTML = `<div style="font-size:10px; color:#666; text-align:center; margin-bottom:5px;">
+                🕐 Início turno: ${maq.horarioInicio}
+              </div>`;
+            }
 
-              // Exibir meta do turno atual se disponível
-              let metaTurnoHTML = '';
-              if (maq.metaTurnoAtual && maq.metaTurnoAtual > 0) {
-                const metaFormatada = maq.metaTurnoAtual.toFixed(2);
-                const percentualAtingido = maq.totalProduzindo > 0 ? ((maq.totalProduzindo / 3600 / maq.metaTurnoAtual) * 100).toFixed(1) : 0;
-                metaTurnoHTML = `<div style="font-size:10px; color:#0066cc; text-align:center; margin-bottom:5px; font-weight:bold;">
-                  🎯 Meta ${maq.turnoAtual}: ${metaFormatada}h (${percentualAtingido}%)
-                </div>`;
-              }
+            let metaTurnoHTML = '';
+            if (maq.metaTurnoAtual && maq.metaTurnoAtual > 0) {
+              const metaFormatada = maq.metaTurnoAtual.toFixed(2);
+              const pctMeta = maq.totalProduzindo > 0
+                ? Math.round((maq.totalProduzindo / 3600 / maq.metaTurnoAtual) * 100) : 0;
+              metaTurnoHTML = `<div style="font-size:10px; color:#0066cc; text-align:center; margin-bottom:5px; font-weight:bold;">
+                🎯 Meta ${maq.turnoAtual}: ${metaFormatada}h (<span class="meta-pct">${pctMeta}%</span>)
+              </div>`;
+            }
 
-              const ultimoEvento = new Date(maq.timestamp);
-              const debugInfo = `Último: ${ultimoEvento.toLocaleTimeString('pt-BR')} - ${maq.ultimoEvento}`;
+            const ultimoEvento = new Date(maq.timestamp);
+            const card = document.createElement('div');
+            card.className = `card ${classe}`;
+            card.id = 'card-' + cssId(maq.nome);
 
-              card.innerHTML = `
-                <div class="card-title">${maq.nome}</div>
-                <div class="card-status" style="background:${cor}">${estadoTxt}</div>
-                <div class="card-timer">${tempoFmt}</div>
-                <div style="font-size:9px; color:#999; text-align:center; margin-bottom:8px;" title="${debugInfo}">
-                  Desde: ${ultimoEvento.toLocaleTimeString('pt-BR')}
+            card.innerHTML = `
+              <div class="card-title">${maq.nome}</div>
+              <div class="card-status" style="background:${cor}">${estadoTxt}</div>
+              <div class="card-timer">${tempoFmt}</div>
+              <div class="card-timer-label">tempo no estado atual</div>
+              <div style="font-size:9px; color:#999; text-align:center; margin-bottom:8px;">
+                Desde: ${ultimoEvento.toLocaleTimeString('pt-BR')}
+              </div>
+              ${horarioInicioHTML}
+              ${metaTurnoHTML}
+              <div class="card-daily-totals">
+                <div class="daily-row">
+                  <span style="color:#888;">Produzindo:</span>
+                  <span class="daily-val-prod val-prod">${prodDia}</span>
                 </div>
-                ${horarioInicioHTML}
-                ${metaTurnoHTML}
-                <div class="card-daily-totals">
-                  <div class="daily-row"><span class="daily-val-prod">Produzindo: ${prodDia}</span></div>
-                  <div class="daily-row"><span class="daily-val-stop">Parado: ${stopDia}</span></div>
+                <div class="daily-row">
+                  <span style="color:#888;">Parado:</span>
+                  <span class="daily-val-stop val-stop">${stopDia}</span>
                 </div>
-                <button class="btn-stops" onclick="abrirModalParadas('${maq.nome}', '${maq.turnoAtual}')">🔴 Verificar Paradas Críticas</button>
-                <button class="btn-chart" onclick="abrirGrafico('${maq.nome}')">📊 Análise 30 Dias</button>
-                <div class="card-turno">${maq.turnoAtual}</div>
-                <div class="card-footer-hint" onclick="abrirModal('${maq.nome}', '${maq.turnoAtual}')">👆 Toque para detalhes</div>
-              `;
-              grid.appendChild(card);
-           });
-           section.appendChild(grid);
-           fragment.appendChild(section);
+                <div class="prod-bar-wrap">
+                  <div class="prod-bar-label">
+                    <span>Produtividade no turno</span>
+                    <span class="bar-pct">${pct}%</span>
+                  </div>
+                  <div class="prod-bar-bg">
+                    <div class="prod-bar-fill" style="width:${pct}%; background:${corBarra};"></div>
+                  </div>
+                </div>
+              </div>
+              <button class="btn-stops" onclick="abrirModalParadas('${maq.nome}', '${maq.turnoAtual}')">🔴 Verificar Paradas Críticas</button>
+              <button class="btn-chart" onclick="abrirGrafico('${maq.nome}')">📊 Análise 30 Dias</button>
+              <div class="card-turno">${maq.turnoAtual}</div>
+              <div class="card-footer-hint" onclick="abrirModal('${maq.nome}', '${maq.turnoAtual}')">👆 Toque para detalhes</div>
+            `;
+            grid.appendChild(card);
+          });
+
+          section.appendChild(grid);
+          fragment.appendChild(section);
         });
+
         container.innerHTML = "";
         container.appendChild(fragment);
       }
 
+      // ============================================================
+      // UTILITÁRIOS
+      // ============================================================
+
       function formatarSegundos(s) {
-        if (typeof s !== 'number' || isNaN(s)) return "00:00:00";
+        if (typeof s !== 'number' || isNaN(s) || s < 0) s = 0;
         s = Math.round(s);
-        let h = Math.floor(s/3600).toString().padStart(2,'0');
-        let m = Math.floor((s%3600)/60).toString().padStart(2,'0');
-        let sec = (s%60).toString().padStart(2,'0');
+        const h   = Math.floor(s / 3600).toString().padStart(2, '0');
+        const m   = Math.floor((s % 3600) / 60).toString().padStart(2, '0');
+        const sec = (s % 60).toString().padStart(2, '0');
         return `${h}:${m}:${sec}`;
       }
+
+      // Converte nome da máquina para ID CSS seguro
+      function cssId(nome) {
+        return nome.replace(/[^a-zA-Z0-9]/g, '_');
+      }
+
+      function horaFormatada() {
+        return new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+      }
+
+      function setSyncStatus(tipo, label) {
+        const dot   = document.getElementById('sync-dot');
+        const texto = document.getElementById('sync-label');
+        dot.className = tipo === 'ok' ? '' : tipo === 'syncing' ? 'syncing' : 'error';
+        if (texto) texto.textContent = label;
+      }
+
+      // ============================================================
+      // MODAIS E RESTANTE DO CÓDIGO (sem alterações funcionais)
+      // ============================================================
+
       function abrirModal(nome, turno) {
-         document.getElementById('modal-detalhes').style.display = 'flex';
-         document.getElementById('modal-titulo').innerText = nome;
-         document.getElementById('apt-maquina').value = nome;
-         
-         const selTurno = document.getElementById('apt-turno');
-         for(let i=0; i<selTurno.options.length; i++) {
-            if(selTurno.options[i].text === turno) selTurno.selectedIndex = i;
-         }
-         
-         buscarHistorico();
+        document.getElementById('modal-detalhes').style.display = 'flex';
+        document.getElementById('modal-titulo').innerText = nome;
+        document.getElementById('apt-maquina').value = nome;
+        const selTurno = document.getElementById('apt-turno');
+        for (let i = 0; i < selTurno.options.length; i++) {
+          if (selTurno.options[i].text === turno) selTurno.selectedIndex = i;
+        }
+        buscarHistorico();
       }
+
       function fecharModal() { document.getElementById('modal-detalhes').style.display = 'none'; }
+
       function abrirModalParadas(nome, turno) {
-         document.getElementById('modal-paradas-criticas').style.display = 'flex';
-         document.getElementById('paradas-criticas-conteudo').innerHTML = "Carregando...";
-         document.getElementById('paradas-maquina-nome').innerText = nome;
-         document.getElementById('paradas-turno-info').innerText = turno;
-         
-         google.script.run.withSuccessHandler(paradas => {
-            if(!paradas || paradas.length === 0) document.getElementById('paradas-criticas-conteudo').innerHTML = "Sem paradas críticas.";
-            else {
-               let html = '<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(80px, 1fr)); gap:10px;">';
-               paradas.forEach(p => {
-                 let cor = '#ffa500'; // default amarelo
-                 let dur = p.duracao;
-                 if(dur > 1800) cor = '#dc3545';
-                 else if(dur > 1200) cor = '#ff6b00';
-                 else if(dur > 600) cor = '#ff8c00';
-                 
-                 html += `<div style="background:white; border:2px solid ${cor}; border-radius:8px; padding:12px 8px; text-align:center;">
-                   <div style="color:${cor}; font-weight:bold; font-size:12px;">${p.duracaoFmt}</div>
-                 </div>`;
-               });
-               html += '</div>';
-               document.getElementById('paradas-criticas-conteudo').innerHTML = html;
-            }
-         }).buscarParadasTurnoAtual(nome, turno, new Date().getTime());
+        document.getElementById('modal-paradas-criticas').style.display = 'flex';
+        document.getElementById('paradas-criticas-conteudo').innerHTML = "Carregando...";
+        document.getElementById('paradas-maquina-nome').innerText = nome;
+        document.getElementById('paradas-turno-info').innerText = turno;
+        google.script.run.withSuccessHandler(paradas => {
+          if (!paradas || paradas.length === 0) {
+            document.getElementById('paradas-criticas-conteudo').innerHTML = "Sem paradas críticas.";
+          } else {
+            let html = '<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(80px, 1fr)); gap:10px;">';
+            paradas.forEach(p => {
+              let cor = '#ffa500';
+              const dur = p.duracao;
+              if (dur > 1800) cor = '#dc3545';
+              else if (dur > 1200) cor = '#ff6b00';
+              else if (dur > 600)  cor = '#ff8c00';
+              html += `<div style="background:white; border:2px solid ${cor}; border-radius:8px; padding:12px 8px; text-align:center;">
+                <div style="color:${cor}; font-weight:bold; font-size:12px;">${p.duracaoFmt}</div>
+              </div>`;
+            });
+            html += '</div>';
+            document.getElementById('paradas-criticas-conteudo').innerHTML = html;
+          }
+        }).buscarParadasTurnoAtual(nome, turno, new Date().getTime());
       }
+
       function fecharModalParadas() { document.getElementById('modal-paradas-criticas').style.display = 'none'; }
-      
+
       function abrirGrafico(maquina) {
         document.getElementById('modal-grafico').style.display = 'flex';
         document.getElementById('grafico-titulo').innerText = "📊 " + maquina;
         document.getElementById('grafico-loading').style.display = 'block';
         document.getElementById('charts-container').style.display = 'none';
-        
         google.script.run.withSuccessHandler(renderizarGrafico).buscarDadosGrafico(maquina);
       }
-      
+
       function fecharModalGrafico() {
         document.getElementById('modal-grafico').style.display = 'none';
-        if(chart1) { chart1.destroy(); chart1 = null; }
-        if(chart2) { chart2.destroy(); chart2 = null; }
-        if(chart3) { chart3.destroy(); chart3 = null; }
+        if (chart1) { chart1.destroy(); chart1 = null; }
+        if (chart2) { chart2.destroy(); chart2 = null; }
+        if (chart3) { chart3.destroy(); chart3 = null; }
       }
-      
+
       function renderizarGrafico(dados) {
         document.getElementById('grafico-loading').style.display = 'none';
         document.getElementById('charts-container').style.display = 'block';
 
         function criarChart(idCanvas, labels, dataValues, cor, metaValor) {
-           const ctx = document.getElementById(idCanvas).getContext('2d');
-
-           // Criar array de meta (linha horizontal) se meta > 0
-           const metaData = metaValor > 0 ? dados.labels.map(() => metaValor) : null;
-
-           // Formatar meta para exibição (HH:MM)
-           let metaLabel = '';
-           if (metaValor > 0) {
-             const horas = Math.floor(metaValor);
-             const minutos = Math.round((metaValor - horas) * 60);
-             metaLabel = `Meta (${horas.toString().padStart(2, '0')}:${minutos.toString().padStart(2, '0')})`;
-           }
-
-           const datasets = [
-               {
-                   type: 'bar',
-                   label: 'Horas Rodando',
-                   data: dataValues,
-                   backgroundColor: cor,
-                   borderColor: cor,
-                   borderWidth: 1,
-                   order: 2
-               }
-           ];
-
-           // Adicionar linha de meta se houver meta configurada
-           if (metaData) {
-             datasets.push({
-                 type: 'line',
-                 label: metaLabel,
-                 data: metaData,
-                 borderColor: '#FF0000',
-                 borderWidth: 2,
-                 borderDash: [5, 5],
-                 pointRadius: 0,
-                 tension: 0,
-                 order: 1
-             });
-           }
-
-           return new Chart(ctx, {
-               data: {
-                   labels: labels,
-                   datasets: datasets
-               },
-               options: {
-                   responsive: true,
-                   maintainAspectRatio: false,
-                   scales: {
-                       y: { 
-                           beginAtZero: true,
-                           title: { display: true, text: 'Horas' },
-                           suggestedMax: 6 
-                       }
-                   },
-                   plugins: {
-                     legend: { display: true },
-                     tooltip: {
-                       callbacks: {
-                         label: function(context) {
-                           let label = context.dataset.label || '';
-                           if (label) label += ': ';
-                           if (context.parsed.y !== null) {
-                             // Converter horas decimais para HH:MM:SS
-                             let horasDecimais = context.parsed.y;
-                             let horas = Math.floor(horasDecimais);
-                             let minutosDecimais = (horasDecimais - horas) * 60;
-                             let minutos = Math.floor(minutosDecimais);
-                             let segundos = Math.floor((minutosDecimais - minutos) * 60);
-                             let tempo = horas.toString().padStart(2, '0') + ':' +
-                                        minutos.toString().padStart(2, '0') + ':' +
-                                        segundos.toString().padStart(2, '0');
-                             label += tempo;
-                           }
-                           return label;
-                         }
-                       }
-                     }
-                   }
-               }
-           });
+          const ctx = document.getElementById(idCanvas).getContext('2d');
+          const metaData = metaValor > 0 ? dados.labels.map(() => metaValor) : null;
+          let metaLabel = '';
+          if (metaValor > 0) {
+            const h = Math.floor(metaValor);
+            const min = Math.round((metaValor - h) * 60);
+            metaLabel = `Meta (${h.toString().padStart(2,'0')}:${min.toString().padStart(2,'0')})`;
+          }
+          const datasets = [{ type:'bar', label:'Horas Rodando', data: dataValues, backgroundColor: cor, borderColor: cor, borderWidth:1, order:2 }];
+          if (metaData) datasets.push({ type:'line', label: metaLabel, data: metaData, borderColor:'#FF0000', borderWidth:2, borderDash:[5,5], pointRadius:0, tension:0, order:1 });
+          return new Chart(ctx, {
+            data: { labels, datasets },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              scales: { y: { beginAtZero: true, title:{ display:true, text:'Horas' }, suggestedMax: 6 } },
+              plugins: { legend:{ display:true }, tooltip:{ callbacks:{ label: function(c) {
+                let lbl = c.dataset.label || '';
+                if (lbl) lbl += ': ';
+                if (c.parsed.y !== null) {
+                  const h = Math.floor(c.parsed.y), min = Math.floor((c.parsed.y - h)*60), sec = Math.floor(((c.parsed.y-h)*60 - min)*60);
+                  lbl += h.toString().padStart(2,'0') + ':' + min.toString().padStart(2,'0') + ':' + sec.toString().padStart(2,'0');
+                }
+                return lbl;
+              }}}}
+            }
+          });
         }
 
-        if(chart1) chart1.destroy();
-        if(chart2) chart2.destroy();
-        if(chart3) chart3.destroy();
-
+        if (chart1) chart1.destroy();
+        if (chart2) chart2.destroy();
+        if (chart3) chart3.destroy();
         chart1 = criarChart('chartT1', dados.labels, dados.t1, '#007bff', dados.metaTurno1 || 0);
         chart2 = criarChart('chartT2', dados.labels, dados.t2, '#28a745', dados.metaTurno2 || 0);
-        chart3 = criarChart('chartT3', dados.labels, dados.t3, '#ffc107', dados.metaTurno3 || 0); 
+        chart3 = criarChart('chartT3', dados.labels, dados.t3, '#ffc107', dados.metaTurno3 || 0);
       }
-      
+
       function preencherSelects(l) {
-         const s = document.getElementById('apt-motivo');
-         s.innerHTML = "";
-         l.motivos.forEach(m => { let o = document.createElement('option'); o.text = m; s.add(o); });
-         FamiliasDisponiveis = l.familias || [];
+        const s = document.getElementById('apt-motivo');
+        s.innerHTML = "";
+        l.motivos.forEach(m => { const o = document.createElement('option'); o.text = m; s.add(o); });
+        FamiliasDisponiveis = l.familias || [];
       }
-      function salvarForm() { 
-         const btn = document.querySelector('button.save');
-         const txt = btn.innerText;
-         btn.innerText = "Salvando...";
-         btn.disabled = true;
-         const dados = {
+
+      function salvarForm() {
+        const btn = document.querySelector('button.save');
+        const txt = btn.innerText;
+        btn.innerText = "Salvando...";
+        btn.disabled = true;
+        const dados = {
           maquina: document.getElementById('apt-maquina').value,
-          data: document.getElementById('apt-data').value,
-          turno: document.getElementById('apt-turno').value,
-          motivo: document.getElementById('apt-motivo').value,
+          data:    document.getElementById('apt-data').value,
+          turno:   document.getElementById('apt-turno').value,
+          motivo:  document.getElementById('apt-motivo').value,
           servico: document.getElementById('apt-servico').value,
-          pecas: document.getElementById('apt-pecas').value,
-          custo: document.getElementById('apt-custo').value,
-          obs: document.getElementById('apt-obs').value
-         };
-         google.script.run.withSuccessHandler(msg => {
-            alert(msg);
-            btn.innerText = txt;
-            btn.disabled = false;
-         }).salvarApontamento(dados);
+          pecas:   document.getElementById('apt-pecas').value,
+          custo:   document.getElementById('apt-custo').value,
+          obs:     document.getElementById('apt-obs').value
+        };
+        google.script.run.withSuccessHandler(msg => {
+          alert(msg);
+          btn.innerText = txt;
+          btn.disabled = false;
+        }).salvarApontamento(dados);
       }
-      function buscarHistorico() {
-         document.getElementById('hist-tabela').innerHTML = "Carregando...";
-         google.script.run.withSuccessHandler(lista => {
-            if(!lista || lista.length === 0) {
-              document.getElementById('hist-tabela').innerHTML = "<p style='text-align:center; color:#999; padding:20px;'>Sem registros.</p>";
-              return;
-            }
-            let html = `<div class="table-wrapper"><table><thead><tr><th>Data</th><th>Turno</th><th style="background:#e8f5e9;">Tempo Ligada</th><th style="background:#ffebee;">Tempo Parada</th><th>Custo MO</th><th>Motivo</th><th>Obs</th></tr></thead><tbody>`;
-            lista.forEach(r => {
-              html += `<tr><td>${r.data}</td><td>${r.turno}</td><td>${r.ligada}</td><td>${r.desligada}</td><td>${r.custoMO}</td><td>${r.motivo}</td><td>${r.obs}</td></tr>`;
-            });
-            html += "</tbody></table></div>";
-            document.getElementById('hist-tabela').innerHTML = html;
-         }).buscarHistorico(document.getElementById('apt-maquina').value, 
-                            document.getElementById('hist-ini').value, 
-                            document.getElementById('hist-fim').value);
-      }
-      function filtrarMaquinas(v) {
-         v = v.toLowerCase();
-         document.querySelectorAll('.card').forEach(c => {
-            c.style.display = c.textContent.toLowerCase().includes(v) ? 'flex' : 'none';
-         });
-         // Ocultar seções vazias
-         document.querySelectorAll('.family-section').forEach(s => {
-           const visible = s.querySelectorAll('.card[style="display: flex;"]').length > 0 || s.querySelectorAll('.card:not([style*="display: none"])').length > 0;
-           s.style.display = visible ? 'block' : 'none';
-         });
-      }
-      function switchTab(t, e) {
-         document.querySelectorAll('.tab-body').forEach(b => b.classList.add('hidden'));
-         document.getElementById('view-'+t).classList.remove('hidden');
-         document.querySelectorAll('.tab').forEach(tb => tb.classList.remove('active'));
-         e.currentTarget.classList.add('active');
-      }
-      function abrirModalRelatorioFamilia() { document.getElementById('modal-relatorio-familia').style.display = 'flex'; preencherSelectsRelatorio(); }
-      function fecharRelatorioFamilia() { document.getElementById('modal-relatorio-familia').style.display = 'none'; }
-      function preencherSelectsRelatorio() {
-          const selectFamilia = document.getElementById('filtro-familia');
-          selectFamilia.innerHTML = '<option value="">Selecione...</option>';
-          FamiliasDisponiveis.forEach(fam => {
-             const option = document.createElement('option'); option.value = fam; option.textContent = fam;
-             selectFamilia.appendChild(option);
+
+      function buscarHistorico(tudo) {
+        document.getElementById('hist-tabela').innerHTML = "Carregando...";
+        google.script.run.withSuccessHandler(lista => {
+          if (!lista || lista.length === 0) {
+            document.getElementById('hist-tabela').innerHTML = "<p style='text-align:center; color:#999; padding:20px;'>Sem registros.</p>";
+            return;
+          }
+          let html = `<div class="table-wrapper"><table><thead><tr>
+            <th>Data</th><th>Turno</th>
+            <th style="background:#e8f5e9;">Tempo Ligada</th>
+            <th style="background:#ffebee;">Tempo Parada</th>
+            <th>Custo MO</th><th>Motivo</th><th>Obs</th>
+          </tr></thead><tbody>`;
+          lista.forEach(r => {
+            html += `<tr><td>${r.data}</td><td>${r.turno}</td><td>${r.ligada}</td><td>${r.desligada}</td><td>${r.custoMO}</td><td>${r.motivo}</td><td>${r.obs}</td></tr>`;
           });
+          html += "</tbody></table></div>";
+          document.getElementById('hist-tabela').innerHTML = html;
+        }).buscarHistorico(
+          document.getElementById('apt-maquina').value,
+          document.getElementById('hist-ini').value,
+          document.getElementById('hist-fim').value
+        );
       }
+
+      function filtrarMaquinas(v) {
+        v = v.toLowerCase();
+        document.querySelectorAll('.card').forEach(c => {
+          c.style.display = c.textContent.toLowerCase().includes(v) ? 'flex' : 'none';
+        });
+        document.querySelectorAll('.family-section').forEach(s => {
+          const visible = Array.from(s.querySelectorAll('.card')).some(c => c.style.display !== 'none');
+          s.style.display = visible ? 'block' : 'none';
+        });
+      }
+
+      function switchTab(t, e) {
+        document.querySelectorAll('.tab-body').forEach(b => b.classList.add('hidden'));
+        document.getElementById('view-' + t).classList.remove('hidden');
+        document.querySelectorAll('.tab').forEach(tb => tb.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+      }
+
+      function abrirModalRelatorioFamilia() {
+        document.getElementById('modal-relatorio-familia').style.display = 'flex';
+        preencherSelectsRelatorio();
+      }
+
+      function fecharRelatorioFamilia() { document.getElementById('modal-relatorio-familia').style.display = 'none'; }
+
+      function preencherSelectsRelatorio() {
+        const sel = document.getElementById('filtro-familia');
+        sel.innerHTML = '<option value="">Selecione...</option>';
+        FamiliasDisponiveis.forEach(fam => {
+          const o = document.createElement('option'); o.value = fam; o.textContent = fam; sel.appendChild(o);
+        });
+      }
+
       function gerarRelatorioFamilia() {
-        const familia = document.getElementById('filtro-familia').value;
+        const familia    = document.getElementById('filtro-familia').value;
         const dataInicio = document.getElementById('relatorio-data-inicio').value;
-        const dataFim = document.getElementById('relatorio-data-fim').value;
-
-        if (!familia) {
-          alert('Por favor, selecione uma família de máquinas');
-          return;
-        }
-        if (!dataInicio || !dataFim) {
-          alert('Por favor, selecione o período (data início e fim)');
-          return;
-        }
-
-        // Mostrar loading
+        const dataFim    = document.getElementById('relatorio-data-fim').value;
+        if (!familia)             { alert('Selecione uma família de máquinas'); return; }
+        if (!dataInicio || !dataFim) { alert('Selecione o período'); return; }
         document.getElementById('relatorio-titulo').textContent = `📊 Relatório: ${familia}`;
-        document.getElementById('relatorio-conteudo').innerHTML = '<div style="text-align:center; padding:60px;"><div style="font-size:18px; color:#666;">⏳ Gerando relatório...</div><div style="font-size:13px; color:#999; margin-top:10px;">Processando dados da família ' + familia + '</div></div>';
+        document.getElementById('relatorio-conteudo').innerHTML = '<div style="text-align:center; padding:60px; font-size:14px; color:#666;">⏳ Gerando relatório...</div>';
         document.getElementById('relatorio-acoes').style.display = 'none';
-
-        // Chamar backend
         google.script.run
           .withSuccessHandler(renderizarRelatorioFamilia)
-          .withFailureHandler(erro => {
-            document.getElementById('relatorio-conteudo').innerHTML = '<div style="text-align:center; padding:40px; color:#dc3545;">❌ Erro ao gerar relatório: ' + erro + '</div>';
-            document.getElementById('relatorio-acoes').style.display = 'none';
+          .withFailureHandler(err => {
+            document.getElementById('relatorio-conteudo').innerHTML = '<div style="text-align:center; padding:40px; color:#dc3545;">❌ Erro ao gerar relatório: ' + err + '</div>';
           })
           .buscarRelatorioFamilia(familia, dataInicio, dataFim);
       }
 
       function renderizarRelatorioFamilia(dados) {
         if (!dados || !dados.maquinas || dados.maquinas.length === 0) {
-          document.getElementById('relatorio-conteudo').innerHTML = '<div style="text-align:center; padding:40px; color:#999;">📭 Nenhum dado encontrado para esta família no período selecionado</div>';
+          document.getElementById('relatorio-conteudo').innerHTML = '<div style="text-align:center; padding:40px; color:#999;">📭 Nenhum dado encontrado para este período.</div>';
           document.getElementById('relatorio-acoes').style.display = 'none';
           return;
         }
-
-        let html = '';
-
-        // Cabeçalho do relatório
-        html += `<div style="background:#f8f9fa; padding:20px; border-radius:8px; margin-bottom:20px;">
+        let html = `<div style="background:#f8f9fa; padding:20px; border-radius:8px; margin-bottom:20px;">
           <h2 style="margin:0 0 15px 0; color:#333;">FAMÍLIA: ${dados.familia}</h2>
           <div style="font-size:14px; color:#666; margin-bottom:15px;">Período: ${dados.dataInicio} até ${dados.dataFim}</div>
           <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:15px;">
@@ -704,73 +794,39 @@
             </div>
           </div>
         </div>`;
-
-        // Detalhamento por máquina
         dados.maquinas.forEach(maq => {
-          html += `<div style="margin-bottom:30px; page-break-inside:avoid;">
-            <div style="background:#007bff; color:white; padding:12px 20px; border-radius:5px 5px 0 0; font-weight:bold; font-size:16px;">
-              ${maq.nome}
-            </div>
-            <div class="table-wrapper">
-              <table style="width:100%; border-collapse:collapse; font-size:12px;">
-                <thead>
-                  <tr style="background:#f8f9fa;">
-                    <th style="padding:8px; border:1px solid #ddd; text-align:left;">Data</th>
-                    <th style="padding:8px; border:1px solid #ddd; text-align:center;">Turno</th>
-                    <th style="padding:8px; border:1px solid #ddd; text-align:center; background:#e8f5e9;">Tempo Ligada</th>
-                    <th style="padding:8px; border:1px solid #ddd; text-align:center; background:#ffebee;">Tempo Parada</th>
-                    <th style="padding:8px; border:1px solid #ddd; text-align:left; background:#fff3e0;">Paradas > 3min</th>
-                  </tr>
-                </thead>
-                <tbody>`;
-
-          maq.turnos.forEach(turno => {
+          html += `<div style="margin-bottom:30px;">
+            <div style="background:#007bff; color:white; padding:12px 20px; border-radius:5px 5px 0 0; font-weight:bold; font-size:16px;">${maq.nome}</div>
+            <div class="table-wrapper"><table style="width:100%; border-collapse:collapse; font-size:12px;">
+              <thead><tr style="background:#f8f9fa;">
+                <th style="padding:8px; border:1px solid #ddd;">Data</th>
+                <th style="padding:8px; border:1px solid #ddd; text-align:center;">Turno</th>
+                <th style="padding:8px; border:1px solid #ddd; text-align:center; background:#e8f5e9;">Tempo Ligada</th>
+                <th style="padding:8px; border:1px solid #ddd; text-align:center; background:#ffebee;">Tempo Parada</th>
+                <th style="padding:8px; border:1px solid #ddd; background:#fff3e0;">Paradas &gt; 3min</th>
+              </tr></thead><tbody>`;
+          maq.turnos.forEach(t => {
             html += `<tr>
-              <td style="padding:8px; border:1px solid #ddd; font-weight:500;">${turno.data}</td>
-              <td style="padding:8px; border:1px solid #ddd; text-align:center;"><span style="background:#e3f2fd; padding:4px 8px; border-radius:3px; font-weight:bold; font-size:11px;">${turno.turno}</span></td>
-              <td style="padding:8px; border:1px solid #ddd; text-align:center; color:#2e7d32; font-weight:bold; background:#f1f8f4;">${turno.ligada}</td>
-              <td style="padding:8px; border:1px solid #ddd; text-align:center; color:#c62828; font-weight:bold; background:#fef5f5;">${turno.desligada}</td>
-              <td style="padding:8px; border:1px solid #ddd; font-size:10px; color:#e65100; font-weight:bold; background:#fff8f0;">${turno.paradas3min}</td>
+              <td style="padding:8px; border:1px solid #ddd;">${t.data}</td>
+              <td style="padding:8px; border:1px solid #ddd; text-align:center;"><span style="background:#e3f2fd; padding:4px 8px; border-radius:3px; font-weight:bold; font-size:11px;">${t.turno}</span></td>
+              <td style="padding:8px; border:1px solid #ddd; text-align:center; color:#2e7d32; font-weight:bold;">${t.ligada}</td>
+              <td style="padding:8px; border:1px solid #ddd; text-align:center; color:#c62828; font-weight:bold;">${t.desligada}</td>
+              <td style="padding:8px; border:1px solid #ddd; font-size:10px; color:#e65100;">${t.paradas3min}</td>
             </tr>`;
           });
-
           html += `</tbody></table></div></div>`;
         });
-
         document.getElementById('relatorio-conteudo').innerHTML = html;
-
-        // Mostrar botão de imprimir
         document.getElementById('relatorio-acoes').style.display = 'block';
       }
 
       function imprimirRelatorioFamilia() {
         const conteudo = document.getElementById('relatorio-conteudo').innerHTML;
-        const familia = document.getElementById('filtro-familia').value;
-
-        const janela = window.open('', '_blank');
-        janela.document.write(`
-          <html>
-            <head>
-              <title>Relatório - ${familia}</title>
-              <style>
-                body { font-family: Arial, sans-serif; padding: 20px; }
-                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                th, td { padding: 8px; border: 1px solid #ddd; }
-                th { background: #f8f9fa; font-weight: bold; }
-                @media print {
-                  .no-print { display: none; }
-                  body { padding: 0; }
-                }
-              </style>
-            </head>
-            <body>
-              ${conteudo}
-              <script>
-                window.onload = function() { window.print(); }
-              <\/script>
-            </body>
-          </html>
-        `);
+        const familia  = document.getElementById('filtro-familia').value;
+        const janela   = window.open('', '_blank');
+        janela.document.write(`<html><head><title>Relatório - ${familia}</title>
+          <style>body{font-family:Arial,sans-serif;padding:20px;}table{width:100%;border-collapse:collapse;margin-bottom:20px;}th,td{padding:8px;border:1px solid #ddd;}th{background:#f8f9fa;font-weight:bold;}</style>
+          </head><body>${conteudo}<script>window.onload=function(){window.print();}<\/script></body></html>`);
         janela.document.close();
       }
     </script>
