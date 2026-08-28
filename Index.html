@@ -7,7 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-      :root { --primary: #0056b3; --success: #28a745; --danger: #dc3545; --dark: #333; --light: #f4f6f9; }
+      :root { --primary: #0056b3; --success: #28a745; --danger: #dc3545; --warning: #b3690f; --dark: #333; --light: #f4f6f9; }
       body { font-family: 'Roboto', sans-serif; background-color: var(--light); margin: 0; padding: 0; color: #333; }
 
       #login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #004a99, #002a5c); display: flex; justify-content: center; align-items: center; z-index: 2000; }
@@ -110,6 +110,42 @@
       th { background: #f1f3f5; color: #444; font-weight: bold; }
       tr:hover { background: #f8f9fa; }
       td.obs { white-space: normal; min-width: 150px; }
+
+      /* ---------- Tela de relatório (perfil "relatorio") ---------- */
+      #relatorio-container { display: none; padding: 10px; max-width: 1400px; margin: 0 auto; }
+
+      .mes-tab { padding: 6px 14px; border-radius: 16px; border: 1px solid #ddd; background: #fff; font-size: 12px; font-weight: bold; color: #666; cursor: pointer; text-transform: capitalize; }
+      .mes-tab:hover { background: #f1f3f5; }
+      .mes-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+      .rel-kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 20px; }
+      .rel-kpi { background: #fff; border: 1px solid #eee; border-radius: 8px; padding: 14px 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+      .rel-kpi .n { font-size: 26px; font-weight: 700; font-family: 'Courier New', monospace; line-height: 1; }
+      .rel-kpi .l { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .03em; margin-top: 6px; }
+      .rel-kpi.total .n { color: var(--primary); }
+      .rel-kpi.ok .n { color: var(--success); }
+      .rel-kpi.atencao .n { color: var(--warning); }
+      .rel-kpi.bad .n { color: var(--danger); }
+
+      .rel-setor { background: #fff; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 16px; overflow: hidden; }
+      .rel-setor-head { background: var(--primary); color: #fff; padding: 8px 15px; font-size: 13px; font-weight: bold; letter-spacing: .5px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; }
+      .rel-setor-head .cnt { font-weight: normal; font-size: 11px; opacity: .9; }
+      .rel-chip-grid { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px; }
+      .rel-chip { width: 78px; border-radius: 8px; padding: 6px 4px 7px; text-align: center; border: 1px solid transparent; }
+      .rel-chip .c-code { display: block; font-family: 'Courier New', monospace; font-size: 11px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .rel-chip .c-h { display: block; font-family: 'Courier New', monospace; font-size: 10px; margin-top: 2px; }
+      .rel-chip.ok { background: #e8f5e9; border-color: #c8e6c9; }
+      .rel-chip.ok .c-code { color: #1b5e20; }
+      .rel-chip.ok .c-h { color: #2e7d32; }
+      .rel-chip.warn { background: #fff3e0; border-color: #ffe0b2; }
+      .rel-chip.warn .c-code { color: #8a5300; }
+      .rel-chip.warn .c-h { color: #a3660a; }
+      .rel-chip.bad { background: #fce8e6; border-color: #f5c6c2; }
+      .rel-chip.bad .c-code { color: #a83226; }
+      .rel-chip.bad .c-h { color: #b8493a; }
+
+      .rel-atencao-title { font-size: 15px; font-weight: bold; margin: 24px 0 10px; display: flex; align-items: center; gap: 6px; color: var(--dark); }
+      .rel-atencao-title .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); display: inline-block; }
     </style>
   </head>
   <body>
@@ -153,6 +189,33 @@
       <div id="maquinas-grid">
         <div style="text-align:center; padding:40px;">
           <div style="font-size:14px; color:#666;">⏳ Carregando dados das máquinas...</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="relatorio-container">
+      <header>
+        <div>
+          <h1>Relatório de Produção</h1>
+          <div style="margin-top:8px; display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
+            <span class="stats-badge stats-total" id="rel-stats-total">0 máquinas</span>
+            <span class="stats-badge stats-running" id="rel-stats-ok">0 dentro da meta</span>
+            <span class="stats-badge" id="rel-stats-atencao" style="background:#fff3e0; color:#b3690f;">0 em atenção</span>
+            <span class="stats-badge stats-stopped" id="rel-stats-bad">0 sem produção</span>
+          </div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <input type="date" id="rel-data" onchange="carregarRelatorio(this.value)"
+            style="padding:8px 12px; border:1px solid #ddd; border-radius:5px; font-size:13px;">
+          <div class="user-badge" id="rel-user-display">Usuário</div>
+        </div>
+      </header>
+
+      <div id="rel-meses" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px;"></div>
+
+      <div id="rel-conteudo">
+        <div style="text-align:center; padding:40px;">
+          <div style="font-size:14px; color:#666;">⏳ Carregando relatório...</div>
         </div>
       </div>
     </div>
@@ -296,6 +359,10 @@
       // ESTADO GLOBAL
       // ============================================================
 
+      // Data (dd/MM/yyyy ou yyyy-MM-dd) vinda do link do e-mail, se houver.
+      // Escapado automaticamente pelo HtmlService — ver doGet() em codigo.gs.
+      var LINK_DATA = "<?= dataLink ?>";
+
       // Snapshot mais recente recebido do servidor
       // Estrutura: { nomeMaquina: { totalProduzindo, totalParada, timestamp, ultimoEvento, ... } }
       let SnapshotServidor = {};
@@ -333,10 +400,16 @@
         msg.innerText = "Verificando...";
         google.script.run.withSuccessHandler(res => {
           if (res.sucesso) {
-            document.getElementById('user-display').innerText = res.usuario;
             document.getElementById('login-overlay').style.display = 'none';
-            document.getElementById('app-container').style.display = 'block';
-            iniciarMonitoramento();
+            if (res.perfil === 'relatorio') {
+              document.getElementById('rel-user-display').innerText = res.usuario;
+              document.getElementById('relatorio-container').style.display = 'block';
+              iniciarRelatorioView();
+            } else {
+              document.getElementById('user-display').innerText = res.usuario;
+              document.getElementById('app-container').style.display = 'block';
+              iniciarMonitoramento();
+            }
           } else {
             msg.innerText = res.erro;
           }
@@ -352,6 +425,158 @@
 
         // Local: a cada 1 segundo — incrementa contadores sem chamar o servidor
         intervaloLocal = setInterval(tickLocal, 1000);
+      }
+
+      // ============================================================
+      // TELA DE RELATÓRIO (perfil "relatorio") — resumo + grade por setor
+      // ============================================================
+
+      function iniciarRelatorioView() {
+        montarMesesRelatorio();
+      }
+
+      function chaveMes(d) {
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      }
+
+      function toInputDate(d) {
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      }
+
+      // Aceita "dd/MM/yyyy" (vindo do link do e-mail) ou "yyyy-MM-dd".
+      function parseDataFlexivel(str) {
+        if (!str) return null;
+        let p = str.split('/');
+        if (p.length === 3) return new Date(parseInt(p[2], 10), parseInt(p[1], 10) - 1, parseInt(p[0], 10));
+        p = str.split('-');
+        if (p.length === 3) return new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+        return null;
+      }
+
+      function montarMesesRelatorio() {
+        const cont = document.getElementById('rel-meses');
+        cont.innerHTML = '';
+        const nomesMes = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+        const hoje = new Date();
+        const meses = [];
+        for (let i = 0; i < 12; i++) {
+          meses.push(new Date(hoje.getFullYear(), hoje.getMonth() - i, 1));
+        }
+
+        let mesInicial = meses[0];
+        const dataLink = parseDataFlexivel(LINK_DATA);
+        if (dataLink) mesInicial = new Date(dataLink.getFullYear(), dataLink.getMonth(), 1);
+        const chaveInicial = chaveMes(mesInicial);
+
+        let botaoInicial = null;
+        meses.forEach(d => {
+          const chave = chaveMes(d);
+          const btn = document.createElement('div');
+          btn.className = 'mes-tab' + (chave === chaveInicial ? ' active' : '');
+          btn.textContent = nomesMes[d.getMonth()] + '/' + d.getFullYear();
+          btn.onclick = () => selecionarMesRelatorio(d, btn);
+          cont.appendChild(btn);
+          if (chave === chaveInicial) botaoInicial = btn;
+        });
+
+        selecionarMesRelatorio(mesInicial, botaoInicial);
+      }
+
+      function selecionarMesRelatorio(dataMes, btnEl) {
+        document.querySelectorAll('.mes-tab').forEach(b => b.classList.remove('active'));
+        if (btnEl) btnEl.classList.add('active');
+        const chaveAtual = chaveMes(dataMes);
+
+        const inicioMes = new Date(dataMes.getFullYear(), dataMes.getMonth(), 1);
+        const fimMes = new Date(dataMes.getFullYear(), dataMes.getMonth() + 1, 0);
+        const input = document.getElementById('rel-data');
+        input.min = toInputDate(inicioMes);
+        input.max = toInputDate(fimMes);
+
+        let dataSelecionada = null;
+        const dataLink = parseDataFlexivel(LINK_DATA);
+        if (dataLink && chaveMes(dataLink) === chaveAtual) dataSelecionada = dataLink;
+        LINK_DATA = ''; // o deep link só vale na primeira carga
+
+        if (!dataSelecionada) {
+          const hoje = new Date();
+          if (chaveMes(hoje) === chaveAtual) {
+            dataSelecionada = new Date(hoje);
+            dataSelecionada.setDate(dataSelecionada.getDate() - 1); // mesma referência do e-mail: ontem
+            if (dataSelecionada < inicioMes) dataSelecionada = new Date(inicioMes);
+          } else {
+            dataSelecionada = fimMes;
+          }
+        }
+
+        input.value = toInputDate(dataSelecionada);
+        carregarRelatorio(input.value);
+      }
+
+      function carregarRelatorio(dataStr) {
+        document.getElementById('rel-conteudo').innerHTML =
+          '<div style="text-align:center; padding:40px;"><div style="font-size:14px; color:#666;">⏳ Carregando relatório...</div></div>';
+        google.script.run
+          .withSuccessHandler(renderizarRelatorioCompacto)
+          .withFailureHandler(err => {
+            document.getElementById('rel-conteudo').innerHTML =
+              '<div style="text-align:center; padding:40px; color:#dc3545;">❌ Erro ao carregar: ' + err + '</div>';
+          })
+          .buscarRelatorioCompacto(dataStr);
+      }
+
+      function renderizarRelatorioCompacto(dados) {
+        if (!dados) {
+          document.getElementById('rel-conteudo').innerHTML =
+            '<div style="text-align:center; padding:40px; color:#999;">📭 Sem dados para esta data.</div>';
+          return;
+        }
+        const t = dados.totais;
+        document.getElementById('rel-stats-total').textContent = t.total + ' máquinas';
+        document.getElementById('rel-stats-ok').textContent = t.ok + ' dentro da meta';
+        document.getElementById('rel-stats-atencao').textContent = t.atencao + ' em atenção';
+        document.getElementById('rel-stats-bad').textContent = t.semProducao + ' sem produção';
+
+        let html = `<div class="rel-kpi-row">
+          <div class="rel-kpi total"><div class="n">${t.total}</div><div class="l">Máquinas</div></div>
+          <div class="rel-kpi ok"><div class="n">${t.ok}</div><div class="l">Dentro da meta</div></div>
+          <div class="rel-kpi atencao"><div class="n">${t.atencao}</div><div class="l">Em atenção</div></div>
+          <div class="rel-kpi bad"><div class="n">${t.semProducao}</div><div class="l">Sem produção</div></div>
+        </div>`;
+
+        if (!dados.setores.length) {
+          html += '<div style="text-align:center; padding:40px; color:#999;">📭 Nenhuma máquina com registro em ' + dados.data + '.</div>';
+        }
+
+        dados.setores.forEach(s => {
+          const problemas = s.maquinas.filter(m => m.status !== 'ok').length;
+          html += `<div class="rel-setor">
+            <div class="rel-setor-head"><span>SETOR &mdash; ${s.nome}</span><span class="cnt">${s.maquinas.length} máq. &middot; ${problemas} em atenção</span></div>
+            <div class="rel-chip-grid">`;
+          s.maquinas.forEach(m => {
+            html += `<div class="rel-chip ${m.status}" title="${m.maquina}">
+              <span class="c-code">${m.maquina}</span><span class="c-h">${m.totalHoras.toFixed(1).replace('.', ',')}h</span></div>`;
+          });
+          html += `</div></div>`;
+        });
+
+        if (dados.atencao.length) {
+          html += `<div class="rel-atencao-title"><span class="dot"></span>Detalhe das máquinas em atenção (${dados.atencao.length})</div>`;
+          html += `<div class="table-wrapper"><table><thead><tr>
+            <th>Máquina</th><th>Turno 1</th><th>Turno 2</th><th>Turno 3</th>
+          </tr></thead><tbody>`;
+          dados.atencao.forEach(m => {
+            html += `<tr><td style="font-weight:bold;">${m.maquina}</td>`;
+            m.turnos.forEach(seg => {
+              if (seg > 0) html += `<td style="text-align:center;color:#28a745;font-weight:bold;">${formatarSegundos(seg)}</td>`;
+              else html += `<td style="text-align:center;color:#dc3545;font-size:10px;font-weight:bold;">SEM OPERAÇÃO</td>`;
+            });
+            html += `</tr>`;
+          });
+          html += `</tbody></table></div>`;
+        }
+
+        document.getElementById('rel-conteudo').innerHTML = html;
       }
 
       // ============================================================

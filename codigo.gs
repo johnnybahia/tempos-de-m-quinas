@@ -26,8 +26,9 @@ function doGet(e) {
   if (e && e.parameter && e.parameter.evento === "HEARTBEAT") {
     return salvarHeartbeat(e);
   }
-  return HtmlService.createTemplateFromFile('Index')
-    .evaluate()
+  const template = HtmlService.createTemplateFromFile('Index');
+  template.dataLink = (e && e.parameter && e.parameter.data) ? String(e.parameter.data) : "";
+  return template.evaluate()
     .setTitle('Monitoramento Fabril')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
@@ -288,7 +289,11 @@ function verificarLogin(usuario, senha) {
   for (let i = 1; i < dados.length; i++) {
     if (String(dados[i][0]).toLowerCase() === String(usuario).toLowerCase()
         && String(dados[i][1]) == senha) {
-      return { sucesso: true, usuario: dados[i][0] };
+      // Coluna C (opcional): "relatorio" = só enxerga o relatório compacto;
+      // vazio ou qualquer outro valor = acesso completo (comportamento de sempre).
+      const perfilRaw = dados[i][2];
+      const perfil = perfilRaw ? String(perfilRaw).trim().toLowerCase() : "completo";
+      return { sucesso: true, usuario: dados[i][0], perfil: perfil || "completo" };
     }
   }
   return { erro: "Acesso negado." };
@@ -1248,10 +1253,118 @@ function testarEnvioEmailHoje() {
   enviarRelatorioBase(new Date());
 }
 
-function enviarRelatorioBase(dataAlvo) {
+// Monta os dados do relatório compacto de um dia: totais, máquinas agrupadas
+// por setor (com status ok/atenção/sem produção) e a lista das que precisam
+// de atenção. Usado tanto pelo e-mail (resumo + link) quanto pela tela de
+// relatório do próprio app (buscarRelatorioCompacto).
+function montarRelatorioCompacto(dataAlvo) {
   const ss = getSS();
   const timezone = ss.getSpreadsheetTimeZone();
   const dataStr = Utilities.formatDate(dataAlvo, timezone, "dd/MM/yyyy");
+
+  const sheetTurnos = ss.getSheetByName("TURNOS");
+  const dadosTurnos = sheetTurnos ? sheetTurnos.getDataRange().getValues() : [];
+  const maquinasStats = {};
+  const metasPorMaquina = {};
+  for (let i = 1; i < dadosTurnos.length; i++) {
+    let maq = String(dadosTurnos[i][0]).trim();
+    if (!maq) continue;
+    maquinasStats[maq] = { "Turno 1": 0, "Turno 2": 0, "Turno 3": 0 };
+    metasPorMaquina[maq] = {
+      "Turno 1": converterMetaParaHoras(dadosTurnos[i][7]),
+      "Turno 2": converterMetaParaHoras(dadosTurnos[i][8]),
+      "Turno 3": converterMetaParaHoras(dadosTurnos[i][9])
+    };
+  }
+
+  const sheetDadosConfig = ss.getSheetByName("DADOS");
+  const mapaFamilias = {};
+  if (sheetDadosConfig) {
+    const dConfig = sheetDadosConfig.getDataRange().getValues();
+    if (dConfig.length > 0) {
+      const h = dConfig[0].map(c => String(c).toUpperCase().trim());
+      const idxM = h.findIndex(x => x.includes("MÁQUINAS") || x.includes("MAQUINAS"));
+      const idxF = h.findIndex(x => x.includes("FAMÍLIA") || x.includes("FAMILIA"));
+      if (idxM > -1 && idxF > -1) {
+        for (let i = 1; i < dConfig.length; i++) {
+          let m = String(dConfig[i][idxM]).trim().toUpperCase();
+          mapaFamilias[m] = String(dConfig[i][idxF] || "OUTROS").trim();
+        }
+      }
+    }
+  }
+
+  const sheetPainel = ss.getSheetByName("PAINEL");
+  if (!sheetPainel) return null;
+  const dadosPainel = sheetPainel.getDataRange().getValues();
+
+  for (let i = 1; i < dadosPainel.length; i++) {
+    let linha = dadosPainel[i];
+    let dataLinha = linha[2];
+    let dataLinhaStr = dataLinha instanceof Date
+      ? Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy")
+      : Utilities.formatDate(lerDataBR(dataLinha), timezone, "dd/MM/yyyy");
+    if (dataLinhaStr !== dataStr) continue;
+
+    let maquina = String(linha[0]).trim();
+    let turno = String(linha[1]).trim();
+    let segundos = converterParaSegundos(linha[3]);
+    if (maquinasStats[maquina] && maquinasStats[maquina][turno] !== undefined) {
+      maquinasStats[maquina][turno] = segundos;
+    }
+  }
+
+  const setoresMap = {};
+  Object.keys(maquinasStats).sort().forEach(maq => {
+    const fam = mapaFamilias[maq.toUpperCase()] || "OUTROS";
+    if (!setoresMap[fam]) setoresMap[fam] = [];
+
+    const turnos = ["Turno 1", "Turno 2", "Turno 3"].map(t => maquinasStats[maq][t]);
+    const totalSeg = turnos.reduce((a, b) => a + b, 0);
+    const totalHoras = totalSeg / 3600;
+
+    const metas = metasPorMaquina[maq] || {};
+    const metaTotal = (metas["Turno 1"] || 0) + (metas["Turno 2"] || 0) + (metas["Turno 3"] || 0);
+
+    let status;
+    if (totalSeg <= 0) status = "bad";
+    else if (metaTotal > 0 && totalHoras < metaTotal * 0.85) status = "warn";
+    else status = "ok";
+
+    setoresMap[fam].push({ maquina: maq, turnos: turnos, totalHoras: totalHoras, status: status });
+  });
+
+  const setores = Object.keys(setoresMap).sort().map(fam => ({ nome: fam, maquinas: setoresMap[fam] }));
+  const todas = setores.reduce((acc, s) => acc.concat(s.maquinas), []);
+
+  return {
+    data: dataStr,
+    totais: {
+      total: todas.length,
+      ok: todas.filter(m => m.status === "ok").length,
+      atencao: todas.filter(m => m.status === "warn").length,
+      semProducao: todas.filter(m => m.status === "bad").length
+    },
+    setores: setores,
+    atencao: todas.filter(m => m.status !== "ok")
+  };
+}
+
+// Chamada pela tela de relatório (Index.html). dataStr no formato "yyyy-MM-dd"
+// (o que o <input type="date"> do navegador envia).
+function buscarRelatorioCompacto(dataStr) {
+  try {
+    const partes = String(dataStr).split("-");
+    const dataAlvo = new Date(parseInt(partes[0], 10), parseInt(partes[1], 10) - 1, parseInt(partes[2], 10));
+    return montarRelatorioCompacto(dataAlvo);
+  } catch (error) {
+    console.error("Erro em buscarRelatorioCompacto: " + error.message);
+    return null;
+  }
+}
+
+function enviarRelatorioBase(dataAlvo) {
+  const ss = getSS();
 
   const sheetEmail = ss.getSheetByName("EMAIL");
   let destinatarios = "";
@@ -1261,114 +1374,41 @@ function enviarRelatorioBase(dataAlvo) {
   }
   if (!destinatarios) { Logger.log("❌ Nenhum e-mail na aba EMAIL."); return; }
 
-  const sheetTurnos = ss.getSheetByName("TURNOS");
-  const dadosTurnos = sheetTurnos.getDataRange().getValues();
-  const maquinasStats = {};
-  for (let i = 1; i < dadosTurnos.length; i++) {
-    let maq = String(dadosTurnos[i][0]).trim();
-    if (maq) maquinasStats[maq] = { "Turno 1": 0, "Turno 2": 0, "Turno 3": 0 };
+  const relatorio = montarRelatorioCompacto(dataAlvo);
+  if (!relatorio) { Logger.log("❌ Aba PAINEL não encontrada — relatório não gerado."); return; }
+
+  let urlApp = "";
+  try { urlApp = ScriptApp.getService().getUrl(); } catch (error) {
+    Logger.log("⚠ Não foi possível obter a URL do app: " + error.message);
   }
+  const link = urlApp ? (urlApp + "?data=" + encodeURIComponent(relatorio.data)) : "";
 
-  const sheetDadosEmail = ss.getSheetByName("DADOS");
-  const mapaFamiliasEmail = {};
-  if (sheetDadosEmail) {
-    const dConfig = sheetDadosEmail.getDataRange().getValues();
-    if (dConfig.length > 0) {
-      const h = dConfig[0].map(c => String(c).toUpperCase().trim());
-      const idxM = h.findIndex(x => x.includes("MÁQUINAS") || x.includes("MAQUINAS"));
-      const idxF = h.findIndex(x => x.includes("FAMÍLIA") || x.includes("FAMILIA"));
-      if (idxM > -1 && idxF > -1) {
-        for (let i = 1; i < dConfig.length; i++) {
-          let m = String(dConfig[i][idxM]).trim().toUpperCase();
-          mapaFamiliasEmail[m] = String(dConfig[i][idxF] || "OUTROS").trim();
-        }
-      }
-    }
-  }
-
-  const sheetPainel = ss.getSheetByName("PAINEL");
-  if (!sheetPainel) return;
-  const dadosPainel = sheetPainel.getDataRange().getValues();
-
-  for (let i = 1; i < dadosPainel.length; i++) {
-    let linha = dadosPainel[i];
-    let dataLinha = linha[2];
-    let dataLinhaStr = "";
-    if (dataLinha instanceof Date) {
-       dataLinhaStr = Utilities.formatDate(dataLinha, timezone, "dd/MM/yyyy");
-    } else {
-       dataLinhaStr = Utilities.formatDate(lerDataBR(dataLinha), timezone, "dd/MM/yyyy");
-    }
-    if (dataLinhaStr !== dataStr) continue;
-
-    let maquina = String(linha[0]).trim();
-    let turno = String(linha[1]).trim();
-    let segundos = converterParaSegundos(linha[3]);
-
-    if (maquinasStats[maquina] && maquinasStats[maquina][turno] !== undefined) {
-       maquinasStats[maquina][turno] = segundos;
-    }
-  }
-
-  const familiasMaquinasEmail = {};
-  Object.keys(maquinasStats).sort().forEach(maq => {
-    const fam = mapaFamiliasEmail[maq.toUpperCase()] || "OUTROS";
-    if (!familiasMaquinasEmail[fam]) familiasMaquinasEmail[fam] = [];
-    familiasMaquinasEmail[fam].push(maq);
-  });
-
-  let html = `
+  const t = relatorio.totais;
+  const html = `
     <div style="font-family:Arial,sans-serif;color:#333;">
       <p>Bom dia!</p>
-      <p>Segue produção em horas das máquinas monitoradas na data <strong>${dataStr}</strong>.</p>
-      <table border="1" cellpadding="8" cellspacing="0"
-        style="border-collapse:collapse;width:100%;border:1px solid #ddd;">
-        <tr style="background-color:#0056b3;color:white;">
-          <th style="text-align:left;">MÁQUINA</th>
-          <th style="text-align:center;">TURNO 1</th>
-          <th style="text-align:center;">TURNO 2</th>
-          <th style="text-align:center;">TURNO 3</th>
-        </tr>`;
-
-  Object.keys(familiasMaquinasEmail).sort().forEach(fam => {
-    html += `<tr style="background-color:#d0e4f7;">
-      <td colspan="4" style="font-weight:bold;color:#0056b3;padding:6px 10px;
-        font-size:13px;letter-spacing:0.5px;">SETOR &mdash; ${fam}</td></tr>`;
-
-    familiasMaquinasEmail[fam].forEach(maq => {
-      html += `<tr><td style="font-weight:bold;padding-left:18px;">${maq}</td>`;
-      ["Turno 1","Turno 2","Turno 3"].forEach(t => {
-        let seg = maquinasStats[maq][t];
-        let celula = seg > 0
-          ? `<span style="color:green;font-weight:bold;font-size:14px;">${formatarSegundosParaEmail(seg)}</span>`
-          : `<span style="color:#dc3545;font-size:10px;font-weight:bold;">SEM OPERAÇÃO NESTE PERÍODO</span>`;
-        html += `<td style="text-align:center;">${celula}</td>`;
-      });
-      html += `</tr>`;
-    });
-  });
-
-  html += `</table><br>
-    <p>Atenciosamente,<br><strong>Controle de Rotinas e Prazos Marfim.</strong></p></div>`;
+      <p>O relatório de produção de <strong>${relatorio.data}</strong> está pronto.</p>
+      <p style="font-size:14px;">
+        <strong>${t.total}</strong> máquinas monitoradas &middot;
+        <span style="color:#28a745;font-weight:bold;">${t.ok} dentro da meta</span> &middot;
+        <span style="color:#b3690f;font-weight:bold;">${t.atencao} em atenção</span> &middot;
+        <span style="color:#c0392b;font-weight:bold;">${t.semProducao} sem produção</span>
+      </p>
+      ${link ? `<p><a href="${link}" style="display:inline-block;background:#0056b3;color:#ffffff;
+        text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:bold;">Abrir relatório completo</a></p>` : ""}
+      <p>Atenciosamente,<br><strong>Controle de Rotinas e Prazos Marfim.</strong></p>
+    </div>`;
 
   try {
     MailApp.sendEmail({
       to: destinatarios,
-      subject: "Controle de Produtividade por Máquina CEARÁ - " + dataStr,
+      subject: "Controle de Produtividade por Máquina CEARÁ - " + relatorio.data,
       htmlBody: html
     });
     Logger.log("✅ E-mail enviado para: " + destinatarios);
-  } catch (e) {
-    Logger.log("❌ Erro ao enviar: " + e.message);
+  } catch (error) {
+    Logger.log("❌ Erro ao enviar: " + error.message);
   }
-}
-
-function formatarSegundosParaEmail(segundos) {
-  if (typeof segundos !== 'number' || isNaN(segundos)) return "00:00:00";
-  segundos = Math.round(segundos);
-  return Math.floor(segundos/3600).toString().padStart(2,'0') + ":" +
-         Math.floor((segundos%3600)/60).toString().padStart(2,'0') + ":" +
-         (segundos%60).toString().padStart(2,'0');
 }
 
 function FORCAR_AUTORIZACAO() {
