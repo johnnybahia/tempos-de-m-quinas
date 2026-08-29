@@ -1331,7 +1331,7 @@ function montarRelatorioCompacto(dataAlvo) {
     else if (metaTotal > 0 && totalHoras < metaTotal * 0.85) status = "warn";
     else status = "ok";
 
-    setoresMap[fam].push({ maquina: maq, turnos: turnos, totalHoras: totalHoras, status: status });
+    setoresMap[fam].push({ maquina: maq, setor: fam, turnos: turnos, totalHoras: totalHoras, status: status });
   });
 
   const setores = Object.keys(setoresMap).sort().map(fam => ({ nome: fam, maquinas: setoresMap[fam] }));
@@ -1504,10 +1504,20 @@ function enviarRelatorioBase(dataAlvo) {
   const relatorio = montarRelatorioCompacto(dataAlvo);
   if (!relatorio) { Logger.log("❌ Aba PAINEL não encontrada — relatório não gerado."); return; }
 
+  // Planilha: fica como histórico, rodando por baixo dos panos — não é
+  // mais o link principal do e-mail (isso agora é a tela HTML abaixo).
   const ssRelatorio = getOuCriarPlanilhaRelatorio();
   const abaRelatorio = escreverRelatorioNaPlanilha(ssRelatorio, relatorio);
   compartilharPlanilhaRelatorio(ssRelatorio, destinatarios);
-  const link = abaRelatorio ? (ssRelatorio.getUrl() + "#gid=" + abaRelatorio.getSheetId()) : ssRelatorio.getUrl();
+  const linkPlanilha = abaRelatorio ? (ssRelatorio.getUrl() + "#gid=" + abaRelatorio.getSheetId()) : ssRelatorio.getUrl();
+
+  // Relatório do dia, visual, com filtro por setor — é o próprio Web App
+  // (perfil "relatorio" na aba LOGIN), não a planilha.
+  let urlApp = "";
+  try { urlApp = ScriptApp.getService().getUrl(); } catch (error) {
+    Logger.log("⚠ Não foi possível obter a URL do app: " + error.message);
+  }
+  const linkRelatorio = urlApp ? (urlApp + "?data=" + encodeURIComponent(relatorio.data)) : "";
 
   const t = relatorio.totais;
   const html = `
@@ -1520,8 +1530,9 @@ function enviarRelatorioBase(dataAlvo) {
         <span style="color:#b3690f;font-weight:bold;">${t.atencao} em atenção</span> &middot;
         <span style="color:#c0392b;font-weight:bold;">${t.semProducao} sem produção</span>
       </p>
-      <p><a href="${link}" style="display:inline-block;background:#0056b3;color:#ffffff;
-        text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:bold;">Abrir planilha de produção (${nomeAbaMes(lerDataBR(relatorio.data))})</a></p>
+      ${linkRelatorio ? `<p><a href="${linkRelatorio}" style="display:inline-block;background:#0056b3;color:#ffffff;
+        text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:bold;">Abrir relatório do dia</a></p>` : ""}
+      <p style="font-size:12px;"><a href="${linkPlanilha}" style="color:#0056b3;">Ver histórico completo na planilha (${nomeAbaMes(lerDataBR(relatorio.data))})</a></p>
       <p>Atenciosamente,<br><strong>Controle de Rotinas e Prazos Marfim.</strong></p>
     </div>`;
 

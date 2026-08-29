@@ -118,6 +118,10 @@
       .mes-tab:hover { background: #f1f3f5; }
       .mes-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 
+      .setor-filtro-pill { padding: 5px 12px; border-radius: 14px; border: 1px solid #ddd; background: #fff; font-size: 11px; font-weight: bold; color: #555; cursor: pointer; }
+      .setor-filtro-pill:hover { background: #f1f3f5; }
+      .setor-filtro-pill.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
       .rel-kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 20px; }
       .rel-kpi { background: #fff; border: 1px solid #eee; border-radius: 8px; padding: 14px 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
       .rel-kpi .n { font-size: 26px; font-weight: 700; font-family: 'Courier New', monospace; line-height: 1; }
@@ -130,22 +134,7 @@
       .rel-setor { background: #fff; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 16px; overflow: hidden; }
       .rel-setor-head { background: var(--primary); color: #fff; padding: 8px 15px; font-size: 13px; font-weight: bold; letter-spacing: .5px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; }
       .rel-setor-head .cnt { font-weight: normal; font-size: 11px; opacity: .9; }
-      .rel-chip-grid { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px; }
-      .rel-chip { width: 78px; border-radius: 8px; padding: 6px 4px 7px; text-align: center; border: 1px solid transparent; }
-      .rel-chip .c-code { display: block; font-family: 'Courier New', monospace; font-size: 11px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .rel-chip .c-h { display: block; font-family: 'Courier New', monospace; font-size: 10px; margin-top: 2px; }
-      .rel-chip.ok { background: #e8f5e9; border-color: #c8e6c9; }
-      .rel-chip.ok .c-code { color: #1b5e20; }
-      .rel-chip.ok .c-h { color: #2e7d32; }
-      .rel-chip.warn { background: #fff3e0; border-color: #ffe0b2; }
-      .rel-chip.warn .c-code { color: #8a5300; }
-      .rel-chip.warn .c-h { color: #a3660a; }
-      .rel-chip.bad { background: #fce8e6; border-color: #f5c6c2; }
-      .rel-chip.bad .c-code { color: #a83226; }
-      .rel-chip.bad .c-h { color: #b8493a; }
-
-      .rel-atencao-title { font-size: 15px; font-weight: bold; margin: 24px 0 10px; display: flex; align-items: center; gap: 6px; color: var(--dark); }
-      .rel-atencao-title .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); display: inline-block; }
+      .rel-setor .table-wrapper { padding: 0 4px; }
     </style>
   </head>
   <body>
@@ -211,7 +200,12 @@
         </div>
       </header>
 
-      <div id="rel-meses" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px;"></div>
+      <div id="rel-meses" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px;"></div>
+
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:20px;">
+        <span style="font-size:11px; color:#999; text-transform:uppercase; font-weight:bold;">Filtrar setor:</span>
+        <div id="rel-filtro-setores" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+      </div>
 
       <div id="rel-conteudo">
         <div style="text-align:center; padding:40px;">
@@ -548,24 +542,18 @@
           html += '<div style="text-align:center; padding:40px; color:#999;">📭 Nenhuma máquina com registro em ' + dados.data + '.</div>';
         }
 
+        // Mesma informação que ia no e-mail antigo (máquina x turno 1/2/3,
+        // em horas, verde quando produziu / vermelho quando não) — só que
+        // agora com todas as máquinas visíveis, agrupadas por setor e com
+        // filtro, em vez de uma tabela só que crescia sem fim no e-mail.
         dados.setores.forEach(s => {
           const problemas = s.maquinas.filter(m => m.status !== 'ok').length;
-          html += `<div class="rel-setor">
+          html += `<div class="rel-setor" data-setor="${s.nome}">
             <div class="rel-setor-head"><span>SETOR &mdash; ${s.nome}</span><span class="cnt">${s.maquinas.length} máq. &middot; ${problemas} em atenção</span></div>
-            <div class="rel-chip-grid">`;
+            <div class="table-wrapper"><table><thead><tr>
+              <th>Máquina</th><th>Turno 1</th><th>Turno 2</th><th>Turno 3</th>
+            </tr></thead><tbody>`;
           s.maquinas.forEach(m => {
-            html += `<div class="rel-chip ${m.status}" title="${m.maquina}">
-              <span class="c-code">${m.maquina}</span><span class="c-h">${m.totalHoras.toFixed(1).replace('.', ',')}h</span></div>`;
-          });
-          html += `</div></div>`;
-        });
-
-        if (dados.atencao.length) {
-          html += `<div class="rel-atencao-title"><span class="dot"></span>Detalhe das máquinas em atenção (${dados.atencao.length})</div>`;
-          html += `<div class="table-wrapper"><table><thead><tr>
-            <th>Máquina</th><th>Turno 1</th><th>Turno 2</th><th>Turno 3</th>
-          </tr></thead><tbody>`;
-          dados.atencao.forEach(m => {
             html += `<tr><td style="font-weight:bold;">${m.maquina}</td>`;
             m.turnos.forEach(seg => {
               if (seg > 0) html += `<td style="text-align:center;color:#28a745;font-weight:bold;">${formatarSegundos(seg)}</td>`;
@@ -573,10 +561,49 @@
             });
             html += `</tr>`;
           });
-          html += `</tbody></table></div>`;
-        }
+          html += `</tbody></table></div></div>`;
+        });
 
         document.getElementById('rel-conteudo').innerHTML = html;
+        montarFiltroSetores(dados.setores.map(s => s.nome));
+      }
+
+      // ============================================================
+      // FILTRO POR SETOR (tela de relatório)
+      // ============================================================
+
+      let FiltroSetoresAtivos = new Set();
+
+      function montarFiltroSetores(nomes) {
+        FiltroSetoresAtivos = new Set();
+        const cont = document.getElementById('rel-filtro-setores');
+        cont.innerHTML = '';
+        nomes.forEach(nome => {
+          const pill = document.createElement('div');
+          pill.className = 'setor-filtro-pill';
+          pill.textContent = nome;
+          pill.onclick = () => alternarFiltroSetor(nome, pill);
+          cont.appendChild(pill);
+        });
+      }
+
+      function alternarFiltroSetor(nome, pillEl) {
+        if (FiltroSetoresAtivos.has(nome)) {
+          FiltroSetoresAtivos.delete(nome);
+          pillEl.classList.remove('active');
+        } else {
+          FiltroSetoresAtivos.add(nome);
+          pillEl.classList.add('active');
+        }
+        aplicarFiltroSetores();
+      }
+
+      // Sem nenhum filtro ativo, mostra tudo — filtro é pra restringir, não pra zerar a tela.
+      function aplicarFiltroSetores() {
+        const mostrarTudo = FiltroSetoresAtivos.size === 0;
+        document.querySelectorAll('#rel-conteudo .rel-setor').forEach(bloco => {
+          bloco.style.display = (mostrarTudo || FiltroSetoresAtivos.has(bloco.dataset.setor)) ? '' : 'none';
+        });
       }
 
       // ============================================================
