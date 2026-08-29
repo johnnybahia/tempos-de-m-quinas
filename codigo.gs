@@ -1504,12 +1504,11 @@ function enviarRelatorioBase(dataAlvo) {
   const relatorio = montarRelatorioCompacto(dataAlvo);
   if (!relatorio) { Logger.log("❌ Aba PAINEL não encontrada — relatório não gerado."); return; }
 
-  // Planilha: fica como histórico, rodando por baixo dos panos — não é
-  // mais o link principal do e-mail (isso agora é a tela HTML abaixo).
+  // Planilha: fica como histórico, rodando por baixo dos panos — sem link
+  // no e-mail, só pra quem precisar puxar o histórico direto na planilha.
   const ssRelatorio = getOuCriarPlanilhaRelatorio();
-  const abaRelatorio = escreverRelatorioNaPlanilha(ssRelatorio, relatorio);
+  escreverRelatorioNaPlanilha(ssRelatorio, relatorio);
   compartilharPlanilhaRelatorio(ssRelatorio, destinatarios);
-  const linkPlanilha = abaRelatorio ? (ssRelatorio.getUrl() + "#gid=" + abaRelatorio.getSheetId()) : ssRelatorio.getUrl();
 
   // Relatório do dia, visual, com filtro por setor — é o próprio Web App
   // (perfil "relatorio" na aba LOGIN), não a planilha.
@@ -1530,9 +1529,11 @@ function enviarRelatorioBase(dataAlvo) {
         <span style="color:#b3690f;font-weight:bold;">${t.atencao} em atenção</span> &middot;
         <span style="color:#c0392b;font-weight:bold;">${t.semProducao} sem produção</span>
       </p>
-      ${linkRelatorio ? `<p><a href="${linkRelatorio}" style="display:inline-block;background:#0056b3;color:#ffffff;
-        text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:bold;">Abrir relatório do dia</a></p>` : ""}
-      <p style="font-size:12px;"><a href="${linkPlanilha}" style="color:#0056b3;">Ver histórico completo na planilha (${nomeAbaMes(lerDataBR(relatorio.data))})</a></p>
+      ${linkRelatorio ? `<p style="text-align:center;margin:26px 0;">
+        <a href="${linkRelatorio}" style="display:inline-block;background:#0056b3;color:#ffffff;
+        text-decoration:none;padding:16px 40px;border-radius:8px;font-weight:bold;
+        font-size:17px;letter-spacing:0.3px;">📊 Abrir Relatório do Dia</a>
+      </p>` : ""}
       <p>Atenciosamente,<br><strong>Controle de Rotinas e Prazos Marfim.</strong></p>
     </div>`;
 
