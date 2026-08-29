@@ -1390,30 +1390,28 @@ function nomeAbaMes(data) {
   return meses[data.getMonth()] + " " + data.getFullYear();
 }
 
-// Paleta fixa pras famílias (setores) de máquina — evita tons próximos do
-// verde/vermelho já usados nas colunas de turno, pra não confundir com o
-// status de produção.
+// Paleta fixa pras famílias (setores) de máquina — fundo bem mais saturado
+// que um tom pastel (pra realmente saltar aos olhos ao rolar a aba) e um
+// texto escuro da mesma família de cor pro nome do setor. Evita tons de
+// verde/vermelho, já usados nas colunas de turno.
 const PALETA_SETORES = [
-  "#E3F2FD", // azul
-  "#EDE7F6", // roxo
-  "#FFF3E0", // âmbar
-  "#E0F7FA", // ciano
-  "#FFFDE7", // amarelo
-  "#ECEFF1", // azul-acinzentado
-  "#F3E5F5", // lilás
-  "#E1F5FE", // azul claro
-  "#EFEBE9", // marrom
-  "#E8EAF6", // índigo
-  "#FCE4EC", // rosa
-  "#FFF8E1"  // dourado
+  { fundo: "#BBDEFB", texto: "#0D47A1" }, // azul
+  { fundo: "#FFE0B2", texto: "#E65100" }, // laranja
+  { fundo: "#D1C4E9", texto: "#4527A0" }, // roxo
+  { fundo: "#B2EBF2", texto: "#006064" }, // ciano
+  { fundo: "#F8BBD0", texto: "#880E4F" }, // rosa
+  { fundo: "#D7CCC8", texto: "#3E2723" }, // marrom
+  { fundo: "#C5CAE9", texto: "#1A237E" }, // índigo
+  { fundo: "#CFD8DC", texto: "#263238" }, // azul-acinzentado
+  { fundo: "#FFF59D", texto: "#8D6E00" }  // mostarda
 ];
-const CHAVE_PROP_CORES_SETOR = "CORES_SETOR_V1";
+const CHAVE_PROP_CORES_SETOR = "CORES_SETOR_V2";
 
-// Cada setor recebe a próxima cor livre da paleta na primeira vez que
-// aparece, e essa atribuição fica salva (PropertiesService) — não é um
-// hash do nome, então nunca colide entre setores diferentes, e nunca muda
-// depois de definida, mesmo quando setores novos forem cadastrados.
-// Passado o 13º setor distinto, a paleta recomeça e pode repetir cor.
+// Cada setor recebe o próximo par (fundo/texto) livre da paleta na primeira
+// vez que aparece, e essa atribuição fica salva (PropertiesService) — não é
+// um hash do nome, então nunca colide entre setores diferentes, e nunca
+// muda depois de definida, mesmo quando setores novos forem cadastrados.
+// Passado o 9º setor distinto, a paleta recomeça e pode repetir cor.
 function corParaSetor(nomeSetor) {
   const chave = String(nomeSetor).trim().toUpperCase();
   const props = PropertiesService.getScriptProperties();
@@ -1422,10 +1420,10 @@ function corParaSetor(nomeSetor) {
 
   if (mapa[chave]) return mapa[chave];
 
-  const cor = PALETA_SETORES[Object.keys(mapa).length % PALETA_SETORES.length];
-  mapa[chave] = cor;
+  const par = PALETA_SETORES[Object.keys(mapa).length % PALETA_SETORES.length];
+  mapa[chave] = par;
   props.setProperty(CHAVE_PROP_CORES_SETOR, JSON.stringify(mapa));
-  return cor;
+  return par;
 }
 
 // Grava as máquinas do dia na aba do mês correspondente (cria a aba se
@@ -1447,6 +1445,7 @@ function escreverRelatorioNaPlanilha(ss, relatorio) {
 
   const linhas = [];
   const coresSetor = [];
+  const textosSetor = [];
   const coresTurno = [];
   relatorio.setores.forEach(setor => {
     const cor = corParaSetor(setor.nome);
@@ -1457,7 +1456,8 @@ function escreverRelatorioNaPlanilha(ss, relatorio) {
         formatarSegundosParaHora(m.turnos[1]),
         formatarSegundosParaHora(m.turnos[2])
       ]);
-      coresSetor.push([cor, cor, cor]);
+      coresSetor.push([cor.fundo, cor.fundo, cor.fundo]);
+      textosSetor.push([cor.texto]);
       coresTurno.push(m.turnos.map(seg => seg > 0 ? "#e8f5e9" : "#fce8e6"));
     });
   });
@@ -1466,6 +1466,7 @@ function escreverRelatorioNaPlanilha(ss, relatorio) {
   const primeiraLinhaNova = aba.getLastRow() + 1;
   aba.getRange(primeiraLinhaNova, 1, linhas.length, 6).setValues(linhas);
   aba.getRange(primeiraLinhaNova, 1, linhas.length, 3).setBackgrounds(coresSetor);
+  aba.getRange(primeiraLinhaNova, 2, linhas.length, 1).setFontColors(textosSetor).setFontWeight("bold");
   aba.getRange(primeiraLinhaNova, 3, linhas.length, 1).setFontWeight("bold");
   aba.getRange(primeiraLinhaNova, 4, linhas.length, 3).setBackgrounds(coresTurno);
 
