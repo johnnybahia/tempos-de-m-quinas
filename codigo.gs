@@ -1379,7 +1379,7 @@ function getOuCriarPlanilhaRelatorio() {
       Logger.log("⚠ Planilha de relatório salva não foi encontrada, criando uma nova: " + error.message);
     }
   }
-  const nova = SpreadsheetApp.create("Relatório de Produção — Marfim");
+  const nova = SpreadsheetApp.create("Relatório de Tempo de Máquinas — Marfim");
   props.setProperty(CHAVE_PROP_PLANILHA_RELATORIO, nova.getId());
   Logger.log("✅ Planilha de relatório criada: " + nova.getUrl());
   return nova;
@@ -1523,7 +1523,7 @@ function enviarRelatorioBase(dataAlvo) {
   const html = `
     <div style="font-family:Arial,sans-serif;color:#333;">
       <p>Bom dia!</p>
-      <p>O relatório de produção de <strong>${relatorio.data}</strong> está pronto.</p>
+      <p>O relatório de tempo de máquinas de <strong>${relatorio.data}</strong> está pronto.</p>
       <p style="font-size:14px;">
         <strong>${t.total}</strong> máquinas monitoradas &middot;
         <span style="color:#28a745;font-weight:bold;">${t.ok} dentro da meta</span> &middot;
