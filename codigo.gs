@@ -8,7 +8,7 @@ const ID_PLANILHA = "1jApQbNfM7gUyIL9b3I0CuEFePlnr2DMKeuARCIjrq7g";
 // "/exec" — não em "/dev". Preencher depois de implantar o Web App; até lá,
 // o e-mail cai de volta pra ScriptApp.getService().getUrl(), que dentro de
 // um gatilho retorna a URL de teste "/dev" (só abre pra quem edita o script).
-const URL_APP_RELATORIO = "";
+const URL_APP_RELATORIO = "https://script.google.com/macros/s/AKfycbyoMZd9g_A7IIgcCajQm71OZTEf6R4kMWQvJXy79C6W8MR24OH_Q2sQ9-uko1q9uvH8fg/exec";
 
 function getSS() {
   try {
