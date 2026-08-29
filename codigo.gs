@@ -1331,7 +1331,7 @@ function montarRelatorioCompacto(dataAlvo) {
     else if (metaTotal > 0 && totalHoras < metaTotal * 0.85) status = "warn";
     else status = "ok";
 
-    setoresMap[fam].push({ maquina: maq, turnos: turnos, totalHoras: totalHoras, status: status });
+    setoresMap[fam].push({ maquina: maq, setor: fam, turnos: turnos, totalHoras: totalHoras, status: status });
   });
 
   const setores = Object.keys(setoresMap).sort().map(fam => ({ nome: fam, maquinas: setoresMap[fam] }));
@@ -1379,7 +1379,7 @@ function getOuCriarPlanilhaRelatorio() {
       Logger.log("⚠ Planilha de relatório salva não foi encontrada, criando uma nova: " + error.message);
     }
   }
-  const nova = SpreadsheetApp.create("Relatório de Produção — Marfim");
+  const nova = SpreadsheetApp.create("Relatório de Tempo de Máquinas — Marfim");
   props.setProperty(CHAVE_PROP_PLANILHA_RELATORIO, nova.getId());
   Logger.log("✅ Planilha de relatório criada: " + nova.getUrl());
   return nova;
@@ -1388,6 +1388,42 @@ function getOuCriarPlanilhaRelatorio() {
 function nomeAbaMes(data) {
   const meses = ["JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT","NOV","DEZ"];
   return meses[data.getMonth()] + " " + data.getFullYear();
+}
+
+// Paleta fixa pras famílias (setores) de máquina — fundo bem mais saturado
+// que um tom pastel (pra realmente saltar aos olhos ao rolar a aba) e um
+// texto escuro da mesma família de cor pro nome do setor. Evita tons de
+// verde/vermelho, já usados nas colunas de turno.
+const PALETA_SETORES = [
+  { fundo: "#BBDEFB", texto: "#0D47A1" }, // azul
+  { fundo: "#FFE0B2", texto: "#E65100" }, // laranja
+  { fundo: "#D1C4E9", texto: "#4527A0" }, // roxo
+  { fundo: "#B2EBF2", texto: "#006064" }, // ciano
+  { fundo: "#F8BBD0", texto: "#880E4F" }, // rosa
+  { fundo: "#D7CCC8", texto: "#3E2723" }, // marrom
+  { fundo: "#C5CAE9", texto: "#1A237E" }, // índigo
+  { fundo: "#CFD8DC", texto: "#263238" }, // azul-acinzentado
+  { fundo: "#FFF59D", texto: "#8D6E00" }  // mostarda
+];
+const CHAVE_PROP_CORES_SETOR = "CORES_SETOR_V2";
+
+// Cada setor recebe o próximo par (fundo/texto) livre da paleta na primeira
+// vez que aparece, e essa atribuição fica salva (PropertiesService) — não é
+// um hash do nome, então nunca colide entre setores diferentes, e nunca
+// muda depois de definida, mesmo quando setores novos forem cadastrados.
+// Passado o 9º setor distinto, a paleta recomeça e pode repetir cor.
+function corParaSetor(nomeSetor) {
+  const chave = String(nomeSetor).trim().toUpperCase();
+  const props = PropertiesService.getScriptProperties();
+  const salvo = props.getProperty(CHAVE_PROP_CORES_SETOR);
+  const mapa = salvo ? JSON.parse(salvo) : {};
+
+  if (mapa[chave]) return mapa[chave];
+
+  const par = PALETA_SETORES[Object.keys(mapa).length % PALETA_SETORES.length];
+  mapa[chave] = par;
+  props.setProperty(CHAVE_PROP_CORES_SETOR, JSON.stringify(mapa));
+  return par;
 }
 
 // Grava as máquinas do dia na aba do mês correspondente (cria a aba se
@@ -1408,8 +1444,11 @@ function escreverRelatorioNaPlanilha(ss, relatorio) {
   if (qtdAntiga > 0) aba.deleteRows(inicioAntigo, qtdAntiga);
 
   const linhas = [];
+  const coresSetor = [];
+  const textosSetor = [];
   const coresTurno = [];
   relatorio.setores.forEach(setor => {
+    const cor = corParaSetor(setor.nome);
     setor.maquinas.forEach(m => {
       linhas.push([
         relatorio.data, setor.nome, m.maquina,
@@ -1417,6 +1456,8 @@ function escreverRelatorioNaPlanilha(ss, relatorio) {
         formatarSegundosParaHora(m.turnos[1]),
         formatarSegundosParaHora(m.turnos[2])
       ]);
+      coresSetor.push([cor.fundo, cor.fundo, cor.fundo]);
+      textosSetor.push([cor.texto]);
       coresTurno.push(m.turnos.map(seg => seg > 0 ? "#e8f5e9" : "#fce8e6"));
     });
   });
@@ -1424,7 +1465,16 @@ function escreverRelatorioNaPlanilha(ss, relatorio) {
 
   const primeiraLinhaNova = aba.getLastRow() + 1;
   aba.getRange(primeiraLinhaNova, 1, linhas.length, 6).setValues(linhas);
+  aba.getRange(primeiraLinhaNova, 1, linhas.length, 3).setBackgrounds(coresSetor);
+  aba.getRange(primeiraLinhaNova, 2, linhas.length, 1).setFontColors(textosSetor).setFontWeight("bold");
+  aba.getRange(primeiraLinhaNova, 3, linhas.length, 1).setFontWeight("bold");
   aba.getRange(primeiraLinhaNova, 4, linhas.length, 3).setBackgrounds(coresTurno);
+
+  // Linha mais grossa separando o lançamento de um dia do próximo, pra não
+  // precisar ler a coluna DATA pra saber onde um dia termina e outro começa.
+  aba.getRange(primeiraLinhaNova + linhas.length - 1, 1, 1, 6)
+     .setBorder(null, null, true, null, null, null, "#9aa5b1", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+
   aba.autoResizeColumns(1, 6);
 
   return aba;
@@ -1454,24 +1504,35 @@ function enviarRelatorioBase(dataAlvo) {
   const relatorio = montarRelatorioCompacto(dataAlvo);
   if (!relatorio) { Logger.log("❌ Aba PAINEL não encontrada — relatório não gerado."); return; }
 
+  // Planilha: fica como histórico, rodando por baixo dos panos — não é
+  // mais o link principal do e-mail (isso agora é a tela HTML abaixo).
   const ssRelatorio = getOuCriarPlanilhaRelatorio();
   const abaRelatorio = escreverRelatorioNaPlanilha(ssRelatorio, relatorio);
   compartilharPlanilhaRelatorio(ssRelatorio, destinatarios);
-  const link = abaRelatorio ? (ssRelatorio.getUrl() + "#gid=" + abaRelatorio.getSheetId()) : ssRelatorio.getUrl();
+  const linkPlanilha = abaRelatorio ? (ssRelatorio.getUrl() + "#gid=" + abaRelatorio.getSheetId()) : ssRelatorio.getUrl();
+
+  // Relatório do dia, visual, com filtro por setor — é o próprio Web App
+  // (perfil "relatorio" na aba LOGIN), não a planilha.
+  let urlApp = "";
+  try { urlApp = ScriptApp.getService().getUrl(); } catch (error) {
+    Logger.log("⚠ Não foi possível obter a URL do app: " + error.message);
+  }
+  const linkRelatorio = urlApp ? (urlApp + "?data=" + encodeURIComponent(relatorio.data)) : "";
 
   const t = relatorio.totais;
   const html = `
     <div style="font-family:Arial,sans-serif;color:#333;">
       <p>Bom dia!</p>
-      <p>O relatório de produção de <strong>${relatorio.data}</strong> está pronto.</p>
+      <p>O relatório de tempo de máquinas de <strong>${relatorio.data}</strong> está pronto.</p>
       <p style="font-size:14px;">
         <strong>${t.total}</strong> máquinas monitoradas &middot;
         <span style="color:#28a745;font-weight:bold;">${t.ok} dentro da meta</span> &middot;
         <span style="color:#b3690f;font-weight:bold;">${t.atencao} em atenção</span> &middot;
         <span style="color:#c0392b;font-weight:bold;">${t.semProducao} sem produção</span>
       </p>
-      <p><a href="${link}" style="display:inline-block;background:#0056b3;color:#ffffff;
-        text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:bold;">Abrir planilha de produção (${nomeAbaMes(lerDataBR(relatorio.data))})</a></p>
+      ${linkRelatorio ? `<p><a href="${linkRelatorio}" style="display:inline-block;background:#0056b3;color:#ffffff;
+        text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:bold;">Abrir relatório do dia</a></p>` : ""}
+      <p style="font-size:12px;"><a href="${linkPlanilha}" style="color:#0056b3;">Ver histórico completo na planilha (${nomeAbaMes(lerDataBR(relatorio.data))})</a></p>
       <p>Atenciosamente,<br><strong>Controle de Rotinas e Prazos Marfim.</strong></p>
     </div>`;
 
