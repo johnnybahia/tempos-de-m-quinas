@@ -1390,6 +1390,44 @@ function nomeAbaMes(data) {
   return meses[data.getMonth()] + " " + data.getFullYear();
 }
 
+// Paleta fixa pras famílias (setores) de máquina — evita tons próximos do
+// verde/vermelho já usados nas colunas de turno, pra não confundir com o
+// status de produção.
+const PALETA_SETORES = [
+  "#E3F2FD", // azul
+  "#EDE7F6", // roxo
+  "#FFF3E0", // âmbar
+  "#E0F7FA", // ciano
+  "#FFFDE7", // amarelo
+  "#ECEFF1", // azul-acinzentado
+  "#F3E5F5", // lilás
+  "#E1F5FE", // azul claro
+  "#EFEBE9", // marrom
+  "#E8EAF6", // índigo
+  "#FCE4EC", // rosa
+  "#FFF8E1"  // dourado
+];
+const CHAVE_PROP_CORES_SETOR = "CORES_SETOR_V1";
+
+// Cada setor recebe a próxima cor livre da paleta na primeira vez que
+// aparece, e essa atribuição fica salva (PropertiesService) — não é um
+// hash do nome, então nunca colide entre setores diferentes, e nunca muda
+// depois de definida, mesmo quando setores novos forem cadastrados.
+// Passado o 13º setor distinto, a paleta recomeça e pode repetir cor.
+function corParaSetor(nomeSetor) {
+  const chave = String(nomeSetor).trim().toUpperCase();
+  const props = PropertiesService.getScriptProperties();
+  const salvo = props.getProperty(CHAVE_PROP_CORES_SETOR);
+  const mapa = salvo ? JSON.parse(salvo) : {};
+
+  if (mapa[chave]) return mapa[chave];
+
+  const cor = PALETA_SETORES[Object.keys(mapa).length % PALETA_SETORES.length];
+  mapa[chave] = cor;
+  props.setProperty(CHAVE_PROP_CORES_SETOR, JSON.stringify(mapa));
+  return cor;
+}
+
 // Grava as máquinas do dia na aba do mês correspondente (cria a aba se
 // for a primeira vez). Se já existir um lançamento desse mesmo dia (ex.:
 // reenvio de teste), substitui em vez de duplicar.
@@ -1408,8 +1446,10 @@ function escreverRelatorioNaPlanilha(ss, relatorio) {
   if (qtdAntiga > 0) aba.deleteRows(inicioAntigo, qtdAntiga);
 
   const linhas = [];
+  const coresSetor = [];
   const coresTurno = [];
   relatorio.setores.forEach(setor => {
+    const cor = corParaSetor(setor.nome);
     setor.maquinas.forEach(m => {
       linhas.push([
         relatorio.data, setor.nome, m.maquina,
@@ -1417,6 +1457,7 @@ function escreverRelatorioNaPlanilha(ss, relatorio) {
         formatarSegundosParaHora(m.turnos[1]),
         formatarSegundosParaHora(m.turnos[2])
       ]);
+      coresSetor.push([cor, cor, cor]);
       coresTurno.push(m.turnos.map(seg => seg > 0 ? "#e8f5e9" : "#fce8e6"));
     });
   });
@@ -1424,7 +1465,15 @@ function escreverRelatorioNaPlanilha(ss, relatorio) {
 
   const primeiraLinhaNova = aba.getLastRow() + 1;
   aba.getRange(primeiraLinhaNova, 1, linhas.length, 6).setValues(linhas);
+  aba.getRange(primeiraLinhaNova, 1, linhas.length, 3).setBackgrounds(coresSetor);
+  aba.getRange(primeiraLinhaNova, 3, linhas.length, 1).setFontWeight("bold");
   aba.getRange(primeiraLinhaNova, 4, linhas.length, 3).setBackgrounds(coresTurno);
+
+  // Linha mais grossa separando o lançamento de um dia do próximo, pra não
+  // precisar ler a coluna DATA pra saber onde um dia termina e outro começa.
+  aba.getRange(primeiraLinhaNova + linhas.length - 1, 1, 1, 6)
+     .setBorder(null, null, true, null, null, null, "#9aa5b1", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+
   aba.autoResizeColumns(1, 6);
 
   return aba;
