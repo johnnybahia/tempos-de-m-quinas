@@ -357,6 +357,10 @@
       // Escapado automaticamente pelo HtmlService — ver doGet() em codigo.gs.
       var LINK_DATA = "<?= dataLink ?>";
 
+      // "1" quando o link veio com o token certo (e-mail) — pula a tela de
+      // login e abre o relatório direto. Ver doGet() em codigo.gs.
+      var AUTO_RELATORIO = "<?= autoRelatorio ?>" === "1";
+
       // Snapshot mais recente recebido do servidor
       // Estrutura: { nomeMaquina: { totalProduzindo, totalParada, timestamp, ultimoEvento, ... } }
       let SnapshotServidor = {};
@@ -384,6 +388,17 @@
         document.getElementById('hist-fim').value = hoje;
         document.getElementById('relatorio-data-inicio').value = hoje;
         document.getElementById('relatorio-data-fim').value = hoje;
+
+        // Link do e-mail (token válido) — pula login/senha e abre o
+        // relatório do dia direto.
+        if (AUTO_RELATORIO) {
+          document.getElementById('login-overlay').style.display = 'none';
+          document.getElementById('relatorio-container').style.display = 'block';
+          document.getElementById('rel-user-display').innerText = 'Link do e-mail';
+          iniciarRelatorioView();
+          return;
+        }
+
         google.script.run.withSuccessHandler(preencherSelects).buscarListasDropdown();
       };
 

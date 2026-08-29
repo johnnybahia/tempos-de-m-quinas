@@ -4,6 +4,12 @@
 
 const ID_PLANILHA = "1jApQbNfM7gUyIL9b3I0CuEFePlnr2DMKeuARCIjrq7g";
 
+// URL da implantação (Implantar > Gerenciar implantações), terminada em
+// "/exec" — não em "/dev". Preencher depois de implantar o Web App; até lá,
+// o e-mail cai de volta pra ScriptApp.getService().getUrl(), que dentro de
+// um gatilho retorna a URL de teste "/dev" (só abre pra quem edita o script).
+const URL_APP_RELATORIO = "";
+
 function getSS() {
   try {
     if (ID_PLANILHA && ID_PLANILHA !== "") {
@@ -28,10 +34,31 @@ function doGet(e) {
   }
   const template = HtmlService.createTemplateFromFile('Index');
   template.dataLink = (e && e.parameter && e.parameter.data) ? String(e.parameter.data) : "";
+
+  // Link do e-mail já vem com o token certo — quem abre entra direto no
+  // relatório do dia, sem tela de login/senha.
+  const tokenRecebido = e && e.parameter && e.parameter.token ? String(e.parameter.token) : "";
+  template.autoRelatorio = (tokenRecebido && tokenRecebido === getOuCriarTokenRelatorio()) ? "1" : "";
+
   return template.evaluate()
     .setTitle('Monitoramento Fabril')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+// Token fixo (gerado uma única vez, guardado em PropertiesService) que
+// libera a tela de relatório sem senha pra quem tem o link do e-mail —
+// não precisa cadastrar login nenhum na aba LOGIN pra isso.
+const CHAVE_PROP_TOKEN_RELATORIO = "TOKEN_RELATORIO_V1";
+
+function getOuCriarTokenRelatorio() {
+  const props = PropertiesService.getScriptProperties();
+  let token = props.getProperty(CHAVE_PROP_TOKEN_RELATORIO);
+  if (!token) {
+    token = Utilities.getUuid().replace(/-/g, "");
+    props.setProperty(CHAVE_PROP_TOKEN_RELATORIO, token);
+  }
+  return token;
 }
 
 // ==========================================================
@@ -1510,13 +1537,17 @@ function enviarRelatorioBase(dataAlvo) {
   escreverRelatorioNaPlanilha(ssRelatorio, relatorio);
   compartilharPlanilhaRelatorio(ssRelatorio, destinatarios);
 
-  // Relatório do dia, visual, com filtro por setor — é o próprio Web App
-  // (perfil "relatorio" na aba LOGIN), não a planilha.
-  let urlApp = "";
-  try { urlApp = ScriptApp.getService().getUrl(); } catch (error) {
-    Logger.log("⚠ Não foi possível obter a URL do app: " + error.message);
+  // Relatório do dia, visual, com filtro por setor — é o próprio Web App.
+  // Vai com o token certo, então abre direto, sem pedir login/senha.
+  let urlApp = URL_APP_RELATORIO;
+  if (!urlApp) {
+    try { urlApp = ScriptApp.getService().getUrl(); } catch (error) {
+      Logger.log("⚠ Não foi possível obter a URL do app: " + error.message);
+    }
   }
-  const linkRelatorio = urlApp ? (urlApp + "?data=" + encodeURIComponent(relatorio.data)) : "";
+  const linkRelatorio = urlApp
+    ? (urlApp + "?data=" + encodeURIComponent(relatorio.data) + "&token=" + getOuCriarTokenRelatorio())
+    : "";
 
   const t = relatorio.totais;
   const html = `
