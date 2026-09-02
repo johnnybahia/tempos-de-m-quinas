@@ -99,18 +99,11 @@ function salvarDadosESP32(e) {
       return ContentService.createTextOutput("OK");
     }
 
-    // Lock apenas para operações que precisam: SENSOR TRAVADO e HEARTBEAT
+    // Lock apenas para operação que precisa: HEARTBEAT
     var lock = LockService.getScriptLock();
     try { lock.waitLock(20000); } catch (e) { return ContentService.createTextOutput("BUSY"); }
 
     try {
-      if (evento === "SENSOR TRAVADO") {
-        registrarAlerta(ss, dataStr, horaStr, maquina, evento, duracao);
-        var sheet = ss.getSheetByName("Página1");
-        if (!sheet) sheet = ss.getActiveSheet();
-        sheet.appendRow([dataStr, horaStr, maquina, "TEMPO PARADA", duracao]);
-        return ContentService.createTextOutput("OK");
-      }
       if (evento === "HEARTBEAT") {
         return salvarHeartbeat(e);
       }
@@ -220,68 +213,6 @@ function salvarHeartbeat(e) {
   } catch (error) {
     console.error("Erro em salvarHeartbeat: " + error.message);
     return ContentService.createTextOutput("ERROR");
-  }
-}
-
-// ==========================================================
-// ALERTAS — sensor travado, anomalias
-// ==========================================================
-
-function registrarAlerta(ss, dataStr, horaStr, maquina, evento, duracao) {
-  try {
-    var sheet = garantirAba(ss, "ESP32_ALERTAS",
-      ["DATA", "HORA", "MÁQUINA", "EVENTO", "DURAÇÃO (s)", "OBSERVAÇÃO"]);
-
-    sheet.appendRow([dataStr, horaStr, maquina, evento, duracao,
-      "Verificar sensor/pino físico da máquina"]);
-
-    var ultima = sheet.getLastRow();
-    sheet.getRange(ultima, 1, 1, 6).setBackground("#fce8e6");
-
-    // Envio de e-mail de alerta de sensor travado desativado
-    /*
-    try {
-      var sheetEmail = ss.getSheetByName("EMAIL");
-      if (sheetEmail) {
-        var lista = sheetEmail.getDataRange().getValues();
-        var destinatarios = lista.map(r => r[0])
-          .filter(e => String(e).includes("@")).join(",");
-
-        if (destinatarios) {
-          var duracaoHoras = (parseFloat(duracao) / 3600).toFixed(1);
-          MailApp.sendEmail({
-            to: destinatarios,
-            subject: "⚠ ALERTA — Sensor possivelmente travado: " + maquina,
-            htmlBody: `
-              <div style="font-family:Arial,sans-serif;color:#333;">
-                <h2 style="color:#c0392b;">⚠ Alerta de Sensor Travado</h2>
-                <p>O sistema detectou que a máquina abaixo ficou sem mudança de estado por tempo excessivo.</p>
-                <table border="1" cellpadding="8" cellspacing="0"
-                  style="border-collapse:collapse;border:1px solid #ddd;">
-                  <tr style="background:#c0392b;color:white;">
-                    <th>Máquina</th><th>Data</th><th>Hora</th><th>Duração sem mudança</th>
-                  </tr>
-                  <tr>
-                    <td><strong>${maquina}</strong></td>
-                    <td>${dataStr}</td>
-                    <td>${horaStr}</td>
-                    <td style="color:#c0392b;font-weight:bold;">${duracaoHoras} horas</td>
-                  </tr>
-                </table>
-                <br>
-                <p>Verifique o sensor e o pino GPIO conectado a esta máquina.</p>
-                <p>Atenciosamente,<br><strong>Controle de Rotinas e Prazos Marfim.</strong></p>
-              </div>`
-          });
-        }
-      }
-    } catch (emailErr) {
-      console.error("Erro ao enviar e-mail de alerta: " + emailErr.message);
-    }
-    */
-
-  } catch (error) {
-    console.error("Erro em registrarAlerta: " + error.message);
   }
 }
 
