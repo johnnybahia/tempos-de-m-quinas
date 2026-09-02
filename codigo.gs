@@ -99,18 +99,11 @@ function salvarDadosESP32(e) {
       return ContentService.createTextOutput("OK");
     }
 
-    // Lock apenas para operações que precisam: SENSOR TRAVADO e HEARTBEAT
+    // Lock apenas para operação que precisa: HEARTBEAT
     var lock = LockService.getScriptLock();
     try { lock.waitLock(20000); } catch (e) { return ContentService.createTextOutput("BUSY"); }
 
     try {
-      if (evento === "SENSOR TRAVADO") {
-        registrarAlerta(ss, dataStr, horaStr, maquina, evento, duracao);
-        var sheet = ss.getSheetByName("Página1");
-        if (!sheet) sheet = ss.getActiveSheet();
-        sheet.appendRow([dataStr, horaStr, maquina, "TEMPO PARADA", duracao]);
-        return ContentService.createTextOutput("OK");
-      }
       if (evento === "HEARTBEAT") {
         return salvarHeartbeat(e);
       }
@@ -220,68 +213,6 @@ function salvarHeartbeat(e) {
   } catch (error) {
     console.error("Erro em salvarHeartbeat: " + error.message);
     return ContentService.createTextOutput("ERROR");
-  }
-}
-
-// ==========================================================
-// ALERTAS — sensor travado, anomalias
-// ==========================================================
-
-function registrarAlerta(ss, dataStr, horaStr, maquina, evento, duracao) {
-  try {
-    var sheet = garantirAba(ss, "ESP32_ALERTAS",
-      ["DATA", "HORA", "MÁQUINA", "EVENTO", "DURAÇÃO (s)", "OBSERVAÇÃO"]);
-
-    sheet.appendRow([dataStr, horaStr, maquina, evento, duracao,
-      "Verificar sensor/pino físico da máquina"]);
-
-    var ultima = sheet.getLastRow();
-    sheet.getRange(ultima, 1, 1, 6).setBackground("#fce8e6");
-
-    // Envio de e-mail de alerta de sensor travado desativado
-    /*
-    try {
-      var sheetEmail = ss.getSheetByName("EMAIL");
-      if (sheetEmail) {
-        var lista = sheetEmail.getDataRange().getValues();
-        var destinatarios = lista.map(r => r[0])
-          .filter(e => String(e).includes("@")).join(",");
-
-        if (destinatarios) {
-          var duracaoHoras = (parseFloat(duracao) / 3600).toFixed(1);
-          MailApp.sendEmail({
-            to: destinatarios,
-            subject: "⚠ ALERTA — Sensor possivelmente travado: " + maquina,
-            htmlBody: `
-              <div style="font-family:Arial,sans-serif;color:#333;">
-                <h2 style="color:#c0392b;">⚠ Alerta de Sensor Travado</h2>
-                <p>O sistema detectou que a máquina abaixo ficou sem mudança de estado por tempo excessivo.</p>
-                <table border="1" cellpadding="8" cellspacing="0"
-                  style="border-collapse:collapse;border:1px solid #ddd;">
-                  <tr style="background:#c0392b;color:white;">
-                    <th>Máquina</th><th>Data</th><th>Hora</th><th>Duração sem mudança</th>
-                  </tr>
-                  <tr>
-                    <td><strong>${maquina}</strong></td>
-                    <td>${dataStr}</td>
-                    <td>${horaStr}</td>
-                    <td style="color:#c0392b;font-weight:bold;">${duracaoHoras} horas</td>
-                  </tr>
-                </table>
-                <br>
-                <p>Verifique o sensor e o pino GPIO conectado a esta máquina.</p>
-                <p>Atenciosamente,<br><strong>Controle de Rotinas e Prazos Marfim.</strong></p>
-              </div>`
-          });
-        }
-      }
-    } catch (emailErr) {
-      console.error("Erro ao enviar e-mail de alerta: " + emailErr.message);
-    }
-    */
-
-  } catch (error) {
-    console.error("Erro em registrarAlerta: " + error.message);
   }
 }
 
@@ -1031,6 +962,15 @@ function gerarRelatorioTurnos() {
       // cortava o início; um evento que estourasse o FIM do turno (sensor
       // travado, reconexão do ESP32 etc.) entrava com a duração cheia e
       // inflava o total do turno além do que é fisicamente possível.
+      //
+      // O checkpoint horário do ESP32 (v4.4) manda blocos de até ~1h pra
+      // máquinas que rodam sem trocar de estado — mas esses blocos não
+      // sabem onde a troca de turno cai. Um bloco que começa ainda dentro
+      // do turno anterior e termina já no turno seguinte não pode simplesmente
+      // ter a parte de trás cortada fora: essa sobra é tempo rodado de
+      // verdade e precisa ir pro turno anterior, senão some do total do dia.
+      let sobraSegundos = 0;
+      let sobraFim = null;
       if (configTurnos[maquina]) {
         let turnoConfig = configTurnos[maquina].find(t => t.nome === infoTurno.nome);
         if (turnoConfig && turnoConfig.inicio && turnoConfig.fim) {
@@ -1044,6 +984,12 @@ function gerarRelatorioTurnos() {
            if (infoTurno.cruzaMeiaNoite) dataFimTurnoAbsoluto.setDate(dataFimTurnoAbsoluto.getDate() + 1);
 
            let inicioRealEvento = new Date(dataFim.getTime() - (duracao * 1000));
+
+           if (inicioRealEvento.getTime() < dataInicioTurnoAbsoluto.getTime()) {
+             sobraSegundos = Math.floor((dataInicioTurnoAbsoluto.getTime() - inicioRealEvento.getTime()) / 1000);
+             sobraFim = dataInicioTurnoAbsoluto;
+           }
+
            let inicioEfetivo = Math.max(inicioRealEvento.getTime(), dataInicioTurnoAbsoluto.getTime());
            let fimEfetivo = Math.min(dataFim.getTime(), dataFimTurnoAbsoluto.getTime());
            duracao = Math.max(0, Math.floor((fimEfetivo - inicioEfetivo) / 1000));
@@ -1064,6 +1010,17 @@ function gerarRelatorioTurnos() {
       mapUltimoFim[chaveGap] = dataFim;
 
       processarRegistro(resumo, ss, maquina, dataProducao, infoTurno.nome, nomeEvento, duracao, dataFim);
+
+      // Joga a sobra pro turno anterior, na data de produção correta dele
+      // (mesmo dia, exceto Turno 1 -> Turno 3, que é do dia anterior).
+      if (sobraSegundos > 0) {
+        let nomeAnterior = turnoAnteriorNome(infoTurno.nome);
+        if (nomeAnterior && configTurnos[maquina] && configTurnos[maquina].find(t => t.nome === nomeAnterior)) {
+          let dataProducaoAnterior = new Date(dataProducao);
+          if (infoTurno.nome === "Turno 1") dataProducaoAnterior.setDate(dataProducaoAnterior.getDate() - 1);
+          processarRegistro(resumo, ss, maquina, dataProducaoAnterior, nomeAnterior, nomeEvento, sobraSegundos, sobraFim);
+        }
+      }
     }
   }
 
@@ -1738,6 +1695,15 @@ function parseDuration(raw) {
     return isNaN(s) ? 0 : s;
   }
   return 0;
+}
+// Turno que vem imediatamente antes, na sequência fixa 1 -> 2 -> 3 -> 1 (dia
+// seguinte). Usado só pra saber pra onde mandar a sobra de um evento que
+// começa ainda no turno anterior (ver gerarRelatorioTurnos).
+function turnoAnteriorNome(nomeTurno) {
+  if (nomeTurno === "Turno 1") return "Turno 3";
+  if (nomeTurno === "Turno 2") return "Turno 1";
+  if (nomeTurno === "Turno 3") return "Turno 2";
+  return null;
 }
 function horaParaMinutos(val) {
   if (val instanceof Date) return val.getHours()*60+val.getMinutes();
