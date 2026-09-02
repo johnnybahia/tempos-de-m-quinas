@@ -962,6 +962,15 @@ function gerarRelatorioTurnos() {
       // cortava o início; um evento que estourasse o FIM do turno (sensor
       // travado, reconexão do ESP32 etc.) entrava com a duração cheia e
       // inflava o total do turno além do que é fisicamente possível.
+      //
+      // O checkpoint horário do ESP32 (v4.4) manda blocos de até ~1h pra
+      // máquinas que rodam sem trocar de estado — mas esses blocos não
+      // sabem onde a troca de turno cai. Um bloco que começa ainda dentro
+      // do turno anterior e termina já no turno seguinte não pode simplesmente
+      // ter a parte de trás cortada fora: essa sobra é tempo rodado de
+      // verdade e precisa ir pro turno anterior, senão some do total do dia.
+      let sobraSegundos = 0;
+      let sobraFim = null;
       if (configTurnos[maquina]) {
         let turnoConfig = configTurnos[maquina].find(t => t.nome === infoTurno.nome);
         if (turnoConfig && turnoConfig.inicio && turnoConfig.fim) {
@@ -975,6 +984,12 @@ function gerarRelatorioTurnos() {
            if (infoTurno.cruzaMeiaNoite) dataFimTurnoAbsoluto.setDate(dataFimTurnoAbsoluto.getDate() + 1);
 
            let inicioRealEvento = new Date(dataFim.getTime() - (duracao * 1000));
+
+           if (inicioRealEvento.getTime() < dataInicioTurnoAbsoluto.getTime()) {
+             sobraSegundos = Math.floor((dataInicioTurnoAbsoluto.getTime() - inicioRealEvento.getTime()) / 1000);
+             sobraFim = dataInicioTurnoAbsoluto;
+           }
+
            let inicioEfetivo = Math.max(inicioRealEvento.getTime(), dataInicioTurnoAbsoluto.getTime());
            let fimEfetivo = Math.min(dataFim.getTime(), dataFimTurnoAbsoluto.getTime());
            duracao = Math.max(0, Math.floor((fimEfetivo - inicioEfetivo) / 1000));
@@ -995,6 +1010,17 @@ function gerarRelatorioTurnos() {
       mapUltimoFim[chaveGap] = dataFim;
 
       processarRegistro(resumo, ss, maquina, dataProducao, infoTurno.nome, nomeEvento, duracao, dataFim);
+
+      // Joga a sobra pro turno anterior, na data de produção correta dele
+      // (mesmo dia, exceto Turno 1 -> Turno 3, que é do dia anterior).
+      if (sobraSegundos > 0) {
+        let nomeAnterior = turnoAnteriorNome(infoTurno.nome);
+        if (nomeAnterior && configTurnos[maquina] && configTurnos[maquina].find(t => t.nome === nomeAnterior)) {
+          let dataProducaoAnterior = new Date(dataProducao);
+          if (infoTurno.nome === "Turno 1") dataProducaoAnterior.setDate(dataProducaoAnterior.getDate() - 1);
+          processarRegistro(resumo, ss, maquina, dataProducaoAnterior, nomeAnterior, nomeEvento, sobraSegundos, sobraFim);
+        }
+      }
     }
   }
 
@@ -1669,6 +1695,15 @@ function parseDuration(raw) {
     return isNaN(s) ? 0 : s;
   }
   return 0;
+}
+// Turno que vem imediatamente antes, na sequência fixa 1 -> 2 -> 3 -> 1 (dia
+// seguinte). Usado só pra saber pra onde mandar a sobra de um evento que
+// começa ainda no turno anterior (ver gerarRelatorioTurnos).
+function turnoAnteriorNome(nomeTurno) {
+  if (nomeTurno === "Turno 1") return "Turno 3";
+  if (nomeTurno === "Turno 2") return "Turno 1";
+  if (nomeTurno === "Turno 3") return "Turno 2";
+  return null;
 }
 function horaParaMinutos(val) {
   if (val instanceof Date) return val.getHours()*60+val.getMinutes();
