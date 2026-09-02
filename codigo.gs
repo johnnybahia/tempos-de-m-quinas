@@ -79,6 +79,15 @@ function salvarDadosESP32(e) {
 
     // appendRow é thread-safe — sem lock necessário
     if (evento === "TEMPO PRODUZINDO" || evento === "TEMPO PARADA") {
+      // O ESP32 reenvia o mesmo relatório quando não recebe confirmação a
+      // tempo (Wi-Fi instável, reconexão) — sem isso, o mesmo período de
+      // produção/parada é contado duas vezes. Se chegar de novo a mesma
+      // máquina+evento+duração dentro de poucos minutos, é o mesmo relatório
+      // reenviado, não um evento novo: ignora e responde OK do mesmo jeito
+      // (senão o ESP32 continua tentando reenviar).
+      if (eventoESP32Duplicado(maquina, evento, duracao)) {
+        return ContentService.createTextOutput("OK");
+      }
       var sheet = ss.getSheetByName("Página1");
       if (!sheet) sheet = ss.getActiveSheet();
       sheet.appendRow([dataStr, horaStr, maquina, evento, duracao]);
@@ -113,6 +122,28 @@ function salvarDadosESP32(e) {
   } catch (error) {
     console.error("Erro em salvarDadosESP32: " + error.message);
     return ContentService.createTextOutput("ERROR");
+  }
+}
+
+// Detecta reenvio do mesmo relatório (máquina + evento + duração idênticos,
+// dentro de uma janela curta). Usa CacheService — leitura/escrita O(1), não
+// cresce com o tamanho de Página1, então continua rápido mesmo com muito
+// mais máquinas. Guarda só o último valor por máquina+evento; não afeta um
+// evento seguinte com duração diferente, mesmo que venha logo em seguida.
+const JANELA_DEDUP_SEGUNDOS = 300; // 5 minutos
+
+function eventoESP32Duplicado(maquina, evento, duracao) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const chave = "ULTEVT_" + maquina + "|" + evento;
+    const valorAtual = String(parseFloat(duracao) || 0);
+    const valorAnterior = cache.get(chave);
+    cache.put(chave, valorAtual, JANELA_DEDUP_SEGUNDOS);
+    return valorAnterior !== null && valorAnterior === valorAtual;
+  } catch (error) {
+    // Se o cache falhar por algum motivo, deixa passar — melhor um evento
+    // duplicado ocasional do que perder dados de verdade.
+    return false;
   }
 }
 
@@ -995,18 +1026,27 @@ function gerarRelatorioTurnos() {
         dataProducao.setDate(dataProducao.getDate() - 1);
       }
 
+      // Corta a duração do evento nas duas pontas da janela do turno — igual
+      // já era feito em buscarDadosTempoReal() pro painel ao vivo. Antes só
+      // cortava o início; um evento que estourasse o FIM do turno (sensor
+      // travado, reconexão do ESP32 etc.) entrava com a duração cheia e
+      // inflava o total do turno além do que é fisicamente possível.
       if (configTurnos[maquina]) {
         let turnoConfig = configTurnos[maquina].find(t => t.nome === infoTurno.nome);
-        if (turnoConfig && turnoConfig.inicio) {
+        if (turnoConfig && turnoConfig.inicio && turnoConfig.fim) {
            let horaInicioConfig = new Date(turnoConfig.inicio);
            let dataInicioTurnoAbsoluto = new Date(dataProducao);
            dataInicioTurnoAbsoluto.setHours(horaInicioConfig.getHours(), horaInicioConfig.getMinutes(), 0, 0);
+
+           let horaFimConfig = new Date(turnoConfig.fim);
+           let dataFimTurnoAbsoluto = new Date(dataProducao);
+           dataFimTurnoAbsoluto.setHours(horaFimConfig.getHours(), horaFimConfig.getMinutes(), 0, 0);
+           if (infoTurno.cruzaMeiaNoite) dataFimTurnoAbsoluto.setDate(dataFimTurnoAbsoluto.getDate() + 1);
+
            let inicioRealEvento = new Date(dataFim.getTime() - (duracao * 1000));
-           if (inicioRealEvento.getTime() < dataInicioTurnoAbsoluto.getTime()) {
-              let novaDuracao = Math.floor((dataFim.getTime() - dataInicioTurnoAbsoluto.getTime()) / 1000);
-              if (novaDuracao < 0) novaDuracao = 0;
-              duracao = novaDuracao;
-           }
+           let inicioEfetivo = Math.max(inicioRealEvento.getTime(), dataInicioTurnoAbsoluto.getTime());
+           let fimEfetivo = Math.min(dataFim.getTime(), dataFimTurnoAbsoluto.getTime());
+           duracao = Math.max(0, Math.floor((fimEfetivo - inicioEfetivo) / 1000));
         }
       }
 
@@ -1155,6 +1195,29 @@ function gerarRelatorioTurnos() {
       Logger.log(`Erro ao calcular parada inicial para ${item.maquina} ${item.turno}: ${e.message}`);
     }
 
+    // Rede-de-segurança: o tempo ligado nunca pode passar da duração da
+    // janela do turno. Se passar, é sinal de evento duplicado/sobreposto em
+    // Página1 (reconexão do ESP32 reenviando o mesmo período, por exemplo)
+    // — clampa e loga pra dar pra investigar depois.
+    try {
+      let configMaqFinal = configTurnos[item.maquina];
+      let turnoConfigFinal = configMaqFinal && configMaqFinal.find(t => t.nome === item.turno);
+      if (turnoConfigFinal && turnoConfigFinal.inicio && turnoConfigFinal.fim) {
+        let hIniF = new Date(turnoConfigFinal.inicio), hFimF = new Date(turnoConfigFinal.fim);
+        let minIniF = hIniF.getHours() * 60 + hIniF.getMinutes();
+        let minFimF = hFimF.getHours() * 60 + hFimF.getMinutes();
+        let duracaoTurnoTotal = (minFimF > minIniF) ? (minFimF - minIniF) * 60 : ((1440 - minIniF) + minFimF) * 60;
+        if (item.ligada > duracaoTurnoTotal) {
+          Logger.log("⚠ " + item.maquina + " " + item.turno + " " +
+            Utilities.formatDate(item.data, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy") +
+            ": ligada (" + item.ligada + "s) excedia a janela do turno (" + duracaoTurnoTotal + "s) — ajustado.");
+          item.ligada = duracaoTurnoTotal;
+        }
+      }
+    } catch (e) {
+      Logger.log(`Erro ao validar limite do turno para ${item.maquina} ${item.turno}: ${e.message}`);
+    }
+
     let manual = { motivo: "", servico: "", pecas: "", custoPecas: "", obs: "" };
     let horarioInicioAnterior = "";
     if (mapaPainelExistente[chave]) {
@@ -1253,6 +1316,66 @@ function limparPagina1() {
   sheet.deleteRows(2, qtdLinhas);
   Logger.log("✅ Limpeza Página1: " + qtdLinhas + " linha(s) apagadas (anteriores a "
     + Utilities.formatDate(corte, timezone, "dd/MM/yyyy") + ").");
+}
+
+// Roda uma vez pra limpar as duplicatas que já foram gravadas em Página1
+// antes da checagem em salvarDadosESP32() existir (mesma máquina+evento+
+// duração, a poucos minutos de distância — o ESP32 reenviando o mesmo
+// relatório). Mantém sempre a primeira ocorrência de cada uma, remove as
+// repetidas. Depois de rodar isso, rode gerarRelatorioTurnos() de novo pra
+// recalcular o PAINEL sem a duplicação.
+function removerDuplicatasPagina1() {
+  const ss = getSS();
+  const sheet = ss.getSheetByName("Página1");
+  if (!sheet) { Logger.log("Aba Página1 não encontrada."); return; }
+
+  const dados = sheet.getDataRange().getValues();
+  if (dados.length <= 1) { Logger.log("Nada pra verificar."); return; }
+
+  const JANELA_MS = JANELA_DEDUP_SEGUNDOS * 1000;
+  const ultimoPorChave = {};
+  const linhasParaManter = [dados[0]];
+  const porMaquina = {};
+  let removidas = 0;
+
+  for (let i = 1; i < dados.length; i++) {
+    const linha = dados[i];
+    const maquina = String(linha[2] || "").trim();
+    const evento = String(linha[3] || "").trim();
+
+    if (!maquina || (evento !== "TEMPO PRODUZINDO" && evento !== "TEMPO PARADA")) {
+      linhasParaManter.push(linha);
+      continue;
+    }
+
+    const dataObj = lerDataBR(linha[0]);
+    const horaObj = linha[1] instanceof Date ? linha[1] : new Date(linha[1]);
+    const timestamp = new Date(dataObj);
+    if (!isNaN(horaObj.getTime())) {
+      timestamp.setHours(horaObj.getHours(), horaObj.getMinutes(), horaObj.getSeconds(), 0);
+    }
+
+    const chave = maquina + "|" + evento + "|" + (parseFloat(linha[4]) || 0);
+    const ultimoTs = ultimoPorChave[chave];
+
+    if (ultimoTs !== undefined && (timestamp.getTime() - ultimoTs) <= JANELA_MS) {
+      removidas++;
+      porMaquina[maquina] = (porMaquina[maquina] || 0) + 1;
+      continue; // duplicata — não mantém, não atualiza o "último visto"
+    }
+
+    ultimoPorChave[chave] = timestamp.getTime();
+    linhasParaManter.push(linha);
+  }
+
+  if (removidas === 0) { Logger.log("✅ Nenhuma duplicata encontrada."); return; }
+
+  sheet.clearContents();
+  sheet.getRange(1, 1, linhasParaManter.length, linhasParaManter[0].length).setValues(linhasParaManter);
+
+  Logger.log("✅ " + removidas + " linha(s) duplicada(s) removida(s) de Página1:");
+  Object.keys(porMaquina).sort().forEach(m => Logger.log("   " + m + ": " + porMaquina[m]));
+  Logger.log("Rode gerarRelatorioTurnos() agora pra recalcular o PAINEL sem essas duplicatas.");
 }
 
 function instalarTriggerLimpeza() {
