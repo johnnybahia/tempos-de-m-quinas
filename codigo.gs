@@ -995,18 +995,27 @@ function gerarRelatorioTurnos() {
         dataProducao.setDate(dataProducao.getDate() - 1);
       }
 
+      // Corta a duração do evento nas duas pontas da janela do turno — igual
+      // já era feito em buscarDadosTempoReal() pro painel ao vivo. Antes só
+      // cortava o início; um evento que estourasse o FIM do turno (sensor
+      // travado, reconexão do ESP32 etc.) entrava com a duração cheia e
+      // inflava o total do turno além do que é fisicamente possível.
       if (configTurnos[maquina]) {
         let turnoConfig = configTurnos[maquina].find(t => t.nome === infoTurno.nome);
-        if (turnoConfig && turnoConfig.inicio) {
+        if (turnoConfig && turnoConfig.inicio && turnoConfig.fim) {
            let horaInicioConfig = new Date(turnoConfig.inicio);
            let dataInicioTurnoAbsoluto = new Date(dataProducao);
            dataInicioTurnoAbsoluto.setHours(horaInicioConfig.getHours(), horaInicioConfig.getMinutes(), 0, 0);
+
+           let horaFimConfig = new Date(turnoConfig.fim);
+           let dataFimTurnoAbsoluto = new Date(dataProducao);
+           dataFimTurnoAbsoluto.setHours(horaFimConfig.getHours(), horaFimConfig.getMinutes(), 0, 0);
+           if (infoTurno.cruzaMeiaNoite) dataFimTurnoAbsoluto.setDate(dataFimTurnoAbsoluto.getDate() + 1);
+
            let inicioRealEvento = new Date(dataFim.getTime() - (duracao * 1000));
-           if (inicioRealEvento.getTime() < dataInicioTurnoAbsoluto.getTime()) {
-              let novaDuracao = Math.floor((dataFim.getTime() - dataInicioTurnoAbsoluto.getTime()) / 1000);
-              if (novaDuracao < 0) novaDuracao = 0;
-              duracao = novaDuracao;
-           }
+           let inicioEfetivo = Math.max(inicioRealEvento.getTime(), dataInicioTurnoAbsoluto.getTime());
+           let fimEfetivo = Math.min(dataFim.getTime(), dataFimTurnoAbsoluto.getTime());
+           duracao = Math.max(0, Math.floor((fimEfetivo - inicioEfetivo) / 1000));
         }
       }
 
@@ -1153,6 +1162,29 @@ function gerarRelatorioTurnos() {
       }
     } catch (e) {
       Logger.log(`Erro ao calcular parada inicial para ${item.maquina} ${item.turno}: ${e.message}`);
+    }
+
+    // Rede-de-segurança: o tempo ligado nunca pode passar da duração da
+    // janela do turno. Se passar, é sinal de evento duplicado/sobreposto em
+    // Página1 (reconexão do ESP32 reenviando o mesmo período, por exemplo)
+    // — clampa e loga pra dar pra investigar depois.
+    try {
+      let configMaqFinal = configTurnos[item.maquina];
+      let turnoConfigFinal = configMaqFinal && configMaqFinal.find(t => t.nome === item.turno);
+      if (turnoConfigFinal && turnoConfigFinal.inicio && turnoConfigFinal.fim) {
+        let hIniF = new Date(turnoConfigFinal.inicio), hFimF = new Date(turnoConfigFinal.fim);
+        let minIniF = hIniF.getHours() * 60 + hIniF.getMinutes();
+        let minFimF = hFimF.getHours() * 60 + hFimF.getMinutes();
+        let duracaoTurnoTotal = (minFimF > minIniF) ? (minFimF - minIniF) * 60 : ((1440 - minIniF) + minFimF) * 60;
+        if (item.ligada > duracaoTurnoTotal) {
+          Logger.log("⚠ " + item.maquina + " " + item.turno + " " +
+            Utilities.formatDate(item.data, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy") +
+            ": ligada (" + item.ligada + "s) excedia a janela do turno (" + duracaoTurnoTotal + "s) — ajustado.");
+          item.ligada = duracaoTurnoTotal;
+        }
+      }
+    } catch (e) {
+      Logger.log(`Erro ao validar limite do turno para ${item.maquina} ${item.turno}: ${e.message}`);
     }
 
     let manual = { motivo: "", servico: "", pecas: "", custoPecas: "", obs: "" };
